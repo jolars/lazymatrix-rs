@@ -112,6 +112,37 @@ when centering, whereas a column view (`(row,value)` entries + `cⱼ`/`sⱼ` +
 `‖X̃ⱼ‖²`, solver-managed offset) preserves sparsity. Decide that fork when CD is
 actually built.
 
+## Column/row access — orientation as a capability
+
+When borrowed-slice column or row access lands, keep storage orientation out of
+the operator and express it as a capability trait instead:
+
+- **Orientation-agnostic, every backend implements regardless of layout:**
+  `MatVec`, `MatTransposeVec`, and `ColumnStats`. `ColumnStats` is a single full
+  pass (walk columns on CSC, or sweep row-major accumulating per-column sums on
+  CSR), so aggregate stats are *not* layout-locked — only single-element
+  *borrowing* needs a matching orientation.
+- **Orientation-specific, implemented only where the borrow is contiguous:**
+  `SparseColumns` (`sparse_column(j) -> (&[usize], &[F])`, contiguous in CSC) and
+  a parallel `SparseRows` (`sparse_row(i) -> (&[usize], &[F])`, contiguous in
+  CSR). A backend holding both representations implements both; neither is
+  implemented for the wrong layout.
+
+`LazyMatrix::column(j)` is then gated on `M: SparseColumns` and `row(i)` on
+`M: SparseRows`, so a column-sweep solver (e.g. CD) bounding `M: SparseColumns`
+fails to *compile* against a CSR matrix rather than silently doing an
+O(nnz)-per-column gather — the same capability-as-bound pattern as
+`normalized()`'s `M: ColumnStats`.
+
+Views borrow, never copy. `LazyColumn<'a, F>` borrows the raw column slices and
+copies the two scalars `cⱼ`/`sⱼ`; `LazyRow<'a, F>` borrows the raw row slices
+**and** borrows the whole `centers`/`scales` vectors (a row touches every
+column's scalar, so copying them would be wasteful). Adding CSR is purely
+additive — new backend types (faer `SparseRowMat`, nalgebra `CsrMatrix`)
+implementing the agnostic three plus `SparseRows`; no churn to the CSC code. Name
+the column trait column-specifically now (not a layout-neutral "sparse access")
+so `SparseRows` is the obvious parallel later.
+
 ## Scope (v1)
 
 In: the operator (`matvec` / `mat_transpose_vec`) + `ColumnStats`, over
