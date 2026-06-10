@@ -92,13 +92,14 @@ anywhere in this repo.
 
 ## Example-driven design
 
-The operator API is validated by real algorithms that *consume* it, kept as
-`examples/` (runnable demos, e.g. `least_squares_gd`) plus integration tests
-asserting convergence against the dense oracle (`tests/solvers_faer.rs`). The
-solvers themselves stay out of the library. First-order methods (GD, CG,
-ISTA/FISTA) need only `matvec`/`mat_transpose_vec`. When a consuming algorithm
-reveals a missing *matrix* capability, add it to the operator; never add the
-*solver* to the lib.
+Operator *correctness* is covered by the per-backend operator tests (oracle
+parity + the adjoint identity) — not by running solvers. Real algorithms that
+*consume* the operator live as runnable `examples/` (e.g. `least_squares_gd`) to
+demonstrate usage and pressure-test the API for missing capabilities; the
+solvers themselves stay out of the library and out of the test suite. First-order
+methods (GD, CG, ISTA/FISTA) need only `matvec`/`mat_transpose_vec`. When a
+consuming algorithm reveals a missing *matrix* capability, add it to the
+operator; never add the *solver* to the lib.
 
 **Coordinate descent — deferred.** CD wants single-column ops
 (`X̃ⱼᵀr = (Xⱼᵀr − cⱼΣr)/sⱼ` and the residual update `r −= Δ·X̃ⱼ`). The dot stays
