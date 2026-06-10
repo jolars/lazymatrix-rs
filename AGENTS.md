@@ -96,10 +96,20 @@ The operator API is validated by real algorithms that *consume* it, kept as
 `examples/` (runnable demos, e.g. `least_squares_gd`) plus integration tests
 asserting convergence against the dense oracle (`tests/solvers_faer.rs`). The
 solvers themselves stay out of the library. First-order methods (GD, CG,
-ISTA/FISTA) need only `matvec`/`mat_transpose_vec`; coordinate descent needs
-efficient single-column ops and is the use case that should drive a future
-column-access trait. When a consuming algorithm reveals a missing *matrix*
-capability, add it to the operator; never add the *solver* to the lib.
+ISTA/FISTA) need only `matvec`/`mat_transpose_vec`. When a consuming algorithm
+reveals a missing *matrix* capability, add it to the operator; never add the
+*solver* to the lib.
+
+**Coordinate descent — deferred.** CD wants single-column ops
+(`X̃ⱼᵀr = (Xⱼᵀr − cⱼΣr)/sⱼ` and the residual update `r −= Δ·X̃ⱼ`). The dot stays
+O(nnzⱼ) if the solver tracks `Σr` incrementally, but the centered residual
+update carries an O(n) broadcast term (`r[i] += Δcⱼ/sⱼ` for all i). Keeping CD at
+O(nnz) requires the glmnet/sklearn *offset trick*: represent the residual as
+`(stored vector + scalar offset)` so the broadcast is O(1). That choice shapes
+the column-access API — a simple `col_xt_vec`/`col_axpy` pair is clean but O(n)
+when centering, whereas a column view (`(row,value)` entries + `cⱼ`/`sⱼ` +
+`‖X̃ⱼ‖²`, solver-managed offset) preserves sparsity. Decide that fork when CD is
+actually built.
 
 ## Scope (v1)
 
