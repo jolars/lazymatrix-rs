@@ -2,6 +2,7 @@
 //! Cross-backend agreement: the same logical matrix, normalized the same way,
 //! produces matching operator outputs under faer and nalgebra.
 
+#[path = "common/runner.rs"]
 mod common;
 
 use common::{TestMatrix, assert_close, random_matrix, random_vec};

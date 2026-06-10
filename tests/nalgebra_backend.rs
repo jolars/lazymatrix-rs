@@ -1,6 +1,7 @@
 #![cfg(feature = "nalgebra")]
 //! Verification of the nalgebra sparse backend against the dense oracle.
 
+#[path = "common/runner.rs"]
 mod common;
 
 use common::TestMatrix;
