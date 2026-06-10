@@ -80,11 +80,26 @@ clean. Backend dependency versions are pinned to match the `basin` crate
 
 ## Testing
 
-`tests/common/mod.rs` is a backend-generic suite driven per backend
+`tests/common/runner.rs` is a backend-generic suite driven per backend
 (`faer_backend.rs`, `nalgebra_backend.rs`, `cross_backend.rs`). The oracle
 materializes `X̃` densely and runs naive products; lazy output must match up to
 FP noise. New backends get a thin test file supplying build/convert closures and
 calling `run_backend_suite`. RNG is seeded (`ChaCha8Rng`) for reproducibility.
+
+Shared test modules live in subdirectories and are pulled in with
+`#[path = "common/runner.rs"] mod common;` — do **not** use `mod.rs` filenames
+anywhere in this repo.
+
+## Example-driven design
+
+The operator API is validated by real algorithms that *consume* it, kept as
+`examples/` (runnable demos, e.g. `least_squares_gd`) plus integration tests
+asserting convergence against the dense oracle (`tests/solvers_faer.rs`). The
+solvers themselves stay out of the library. First-order methods (GD, CG,
+ISTA/FISTA) need only `matvec`/`mat_transpose_vec`; coordinate descent needs
+efficient single-column ops and is the use case that should drive a future
+column-access trait. When a consuming algorithm reveals a missing *matrix*
+capability, add it to the operator; never add the *solver* to the lib.
 
 ## Scope (v1)
 

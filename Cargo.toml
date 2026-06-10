@@ -28,3 +28,7 @@ rand = { version = "0.10", default-features = false, features = [
     "std_rng",
 ] }
 rand_chacha = "0.10"
+
+[[example]]
+name = "least_squares_gd"
+required-features = ["faer"]
