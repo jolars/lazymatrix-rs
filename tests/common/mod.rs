@@ -1,0 +1,362 @@
+//! Shared test helpers: a dense oracle and a backend-generic verification suite.
+//!
+//! The oracle materializes `X̃ = (X − 1cᵀ)S⁻¹` densely and runs naive
+//! matrix–vector products; every backend's lazy operator is checked against it.
+#![allow(dead_code)]
+
+use lazymatrix::{
+    Centering, ColumnStats, DotSlice, ElemDivAssign, LazyMatrix, MatTransposeVec, MatVec,
+    Normalization, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries,
+};
+use rand::{RngExt, SeedableRng};
+use rand_chacha::ChaCha8Rng;
+
+/// A randomly-generated sparse matrix in both dense and triplet form.
+pub struct TestMatrix {
+    pub nrows: usize,
+    pub ncols: usize,
+    pub dense: Vec<Vec<f64>>,               // n×p, row-major
+    pub triplets: Vec<(usize, usize, f64)>, // stored nonzeros (row, col, val)
+}
+
+/// Generate a reproducible sparse matrix with the given nonzero `density`.
+pub fn random_matrix(seed: u64, nrows: usize, ncols: usize, density: f64) -> TestMatrix {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    let mut dense = vec![vec![0.0; ncols]; nrows];
+    let mut triplets = Vec::new();
+    for (i, row) in dense.iter_mut().enumerate() {
+        for (j, cell) in row.iter_mut().enumerate() {
+            if rng.random::<f64>() < density {
+                let v: f64 = rng.random_range(-2.0..2.0);
+                if v != 0.0 {
+                    *cell = v;
+                    triplets.push((i, j, v));
+                }
+            }
+        }
+    }
+    TestMatrix {
+        nrows,
+        ncols,
+        dense,
+        triplets,
+    }
+}
+
+/// A reproducible random vector with entries in `[-1.5, 1.5)`.
+pub fn random_vec(seed: u64, n: usize) -> Vec<f64> {
+    let mut rng = ChaCha8Rng::seed_from_u64(seed);
+    (0..n).map(|_| rng.random_range(-1.5..1.5)).collect()
+}
+
+/// Materialize `X̃ = (X − 1cᵀ)S⁻¹` densely.
+pub fn materialize(
+    dense: &[Vec<f64>],
+    centers: Option<&[f64]>,
+    scales: Option<&[f64]>,
+) -> Vec<Vec<f64>> {
+    dense
+        .iter()
+        .map(|row| {
+            row.iter()
+                .enumerate()
+                .map(|(j, &x)| {
+                    let mut x = x;
+                    if let Some(c) = centers {
+                        x -= c[j];
+                    }
+                    if let Some(s) = scales {
+                        x /= s[j];
+                    }
+                    x
+                })
+                .collect()
+        })
+        .collect()
+}
+
+pub fn dense_matvec(m: &[Vec<f64>], v: &[f64]) -> Vec<f64> {
+    m.iter()
+        .map(|row| row.iter().zip(v).map(|(a, b)| a * b).sum())
+        .collect()
+}
+
+pub fn dense_tmatvec(m: &[Vec<f64>], u: &[f64]) -> Vec<f64> {
+    let ncols = m.first().map_or(0, Vec::len);
+    (0..ncols)
+        .map(|j| m.iter().zip(u).map(|(row, &uu)| row[j] * uu).sum())
+        .collect()
+}
+
+pub fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(x, y)| x * y).sum()
+}
+
+pub fn assert_close(a: &[f64], b: &[f64], eps: f64) {
+    assert_eq!(
+        a.len(),
+        b.len(),
+        "length mismatch: {} vs {}",
+        a.len(),
+        b.len()
+    );
+    for (x, y) in a.iter().zip(b) {
+        approx::assert_abs_diff_eq!(x, y, epsilon = eps);
+    }
+}
+
+const EPS: f64 = 1e-10;
+
+/// Run the full verification suite against a backend, given closures that build
+/// the backend matrix `M` from a [`TestMatrix`] and convert between `Vec<f64>`
+/// and the backend vector `V`.
+pub fn run_backend_suite<M, V>(
+    build: impl Fn(&TestMatrix) -> M,
+    to_v: impl Fn(&[f64]) -> V,
+    from_v: impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVec<V> + MatTransposeVec<V> + ColumnStats<f64>,
+    V: Clone
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    oracle_parity(&build, &to_v, &from_v);
+    adjoint_identity(&build, &to_v, &from_v);
+    raw_passthrough(&build, &to_v, &from_v);
+    normalized_matches_oracle(&build, &to_v, &from_v);
+    column_stats_fixed(&build);
+    zero_scale_guard(&build, &to_v, &from_v);
+}
+
+/// (1) + (3): all four center×scale combinations match the dense oracle, for
+/// both `matvec` and `mat_transpose_vec`.
+fn oracle_parity<M, V>(
+    build: &impl Fn(&TestMatrix) -> M,
+    to_v: &impl Fn(&[f64]) -> V,
+    from_v: &impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVec<V> + MatTransposeVec<V>,
+    V: Clone
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    let tm = random_matrix(1, 11, 7, 0.35);
+    let centers = random_vec(2, tm.ncols);
+    let scales: Vec<f64> = random_vec(3, tm.ncols)
+        .iter()
+        .map(|x| x.abs() + 0.5)
+        .collect();
+    let v = to_v(&random_vec(4, tm.ncols));
+    let u = to_v(&random_vec(5, tm.nrows));
+
+    for &use_c in &[false, true] {
+        for &use_s in &[false, true] {
+            let c = use_c.then(|| centers.clone());
+            let s = use_s.then(|| scales.clone());
+            let lazy = LazyMatrix::new(build(&tm), tm.nrows, tm.ncols, c.clone(), s.clone());
+            let xtilde = materialize(&tm.dense, c.as_deref(), s.as_deref());
+
+            let got = from_v(&lazy.matvec(&v));
+            let want = dense_matvec(&xtilde, &from_v(&v));
+            assert_close(&got, &want, EPS);
+
+            let got_t = from_v(&lazy.mat_transpose_vec(&u));
+            let want_t = dense_tmatvec(&xtilde, &from_v(&u));
+            assert_close(&got_t, &want_t, EPS);
+        }
+    }
+}
+
+/// (2): the adjoint identity ⟨X̃v, u⟩ == ⟨v, X̃ᵀu⟩, independent of the oracle.
+fn adjoint_identity<M, V>(
+    build: &impl Fn(&TestMatrix) -> M,
+    to_v: &impl Fn(&[f64]) -> V,
+    from_v: &impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVec<V> + MatTransposeVec<V>,
+    V: Clone
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    let tm = random_matrix(6, 9, 5, 0.5);
+    let centers = random_vec(7, tm.ncols);
+    let scales: Vec<f64> = random_vec(8, tm.ncols)
+        .iter()
+        .map(|x| x.abs() + 0.3)
+        .collect();
+    let lazy = LazyMatrix::new(build(&tm), tm.nrows, tm.ncols, Some(centers), Some(scales));
+    let v = to_v(&random_vec(9, tm.ncols));
+    let u = to_v(&random_vec(10, tm.nrows));
+
+    let xv = from_v(&lazy.matvec(&v));
+    let xtu = from_v(&lazy.mat_transpose_vec(&u));
+    let lhs = dot(&xv, &from_v(&u));
+    let rhs = dot(&from_v(&v), &xtu);
+    approx::assert_abs_diff_eq!(lhs, rhs, epsilon = 1e-9);
+}
+
+/// (3): `raw()` is a bit-exact pass-through to the backend matvec.
+fn raw_passthrough<M, V>(
+    build: &impl Fn(&TestMatrix) -> M,
+    to_v: &impl Fn(&[f64]) -> V,
+    from_v: &impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVec<V> + MatTransposeVec<V>,
+    V: Clone
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    let tm = random_matrix(11, 8, 6, 0.4);
+    let v = to_v(&random_vec(12, tm.ncols));
+    let u = to_v(&random_vec(13, tm.nrows));
+
+    let bare = build(&tm);
+    let bare_y = from_v(&bare.matvec(&v));
+    let bare_t = from_v(&bare.mat_transpose_vec(&u));
+
+    let lazy = LazyMatrix::raw(build(&tm), tm.nrows, tm.ncols);
+    assert_eq!(from_v(&lazy.matvec(&v)), bare_y);
+    assert_eq!(from_v(&lazy.mat_transpose_vec(&u)), bare_t);
+}
+
+/// `normalized()` with every strategy: read back the computed centers/scales and
+/// confirm the operator equals the oracle built from those same vectors.
+fn normalized_matches_oracle<M, V>(
+    build: &impl Fn(&TestMatrix) -> M,
+    to_v: &impl Fn(&[f64]) -> V,
+    from_v: &impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVec<V> + MatTransposeVec<V> + ColumnStats<f64>,
+    V: Clone
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    let tm = random_matrix(14, 13, 6, 0.45);
+    let v = to_v(&random_vec(15, tm.ncols));
+    let u = to_v(&random_vec(16, tm.nrows));
+
+    let centerings = [Centering::None, Centering::Mean];
+    let scalings = [Scaling::None, Scaling::Sd, Scaling::MaxAbs, Scaling::L2];
+    for center in centerings {
+        for scale in scalings {
+            let spec = Normalization::new(center, scale);
+            let lazy = LazyMatrix::normalized(build(&tm), tm.nrows, tm.ncols, spec);
+            let xtilde = materialize(&tm.dense, lazy.centers(), lazy.scales());
+
+            let got = from_v(&lazy.matvec(&v));
+            assert_close(&got, &dense_matvec(&xtilde, &from_v(&v)), EPS);
+            let got_t = from_v(&lazy.mat_transpose_vec(&u));
+            assert_close(&got_t, &dense_tmatvec(&xtilde, &from_v(&u)), EPS);
+        }
+    }
+}
+
+/// (5): `ColumnStats` against hand-computed values on a fixed tiny matrix,
+/// including the centered-l2/maxabs implicit-zero corrections.
+///
+/// ```text
+/// X = | 1  0  5 |
+///     | 3  0  5 |
+///     | 0  0  5 |
+/// ```
+fn column_stats_fixed<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: ColumnStats<f64>,
+{
+    let tm = TestMatrix {
+        nrows: 3,
+        ncols: 3,
+        dense: vec![
+            vec![1.0, 0.0, 5.0],
+            vec![3.0, 0.0, 5.0],
+            vec![0.0, 0.0, 5.0],
+        ],
+        triplets: vec![
+            (0, 0, 1.0),
+            (1, 0, 3.0),
+            (0, 2, 5.0),
+            (1, 2, 5.0),
+            (2, 2, 5.0),
+        ],
+    };
+    let m = build(&tm);
+
+    // Column 0 = [1,3,0]; column 1 = [0,0,0]; column 2 = [5,5,5].
+    assert_close(&m.col_means(), &[4.0 / 3.0, 0.0, 5.0], EPS);
+    // population sd: col0 var = 10/3 − (4/3)² = 14/9; col1 = 0; col2 constant = 0
+    assert_close(&m.col_sds(), &[(14.0_f64 / 9.0).sqrt(), 0.0, 0.0], EPS);
+    assert_close(&m.col_maxabs(), &[3.0, 0.0, 5.0], EPS);
+    assert_close(&m.col_l2(), &[10.0_f64.sqrt(), 0.0, (75.0_f64).sqrt()], EPS);
+
+    let centers = m.col_means();
+    // centered l2² of col0 = n·var = 3·14/9 = 14/3; col1 = 0; col2 = 0
+    assert_close(
+        &m.col_l2_centered(&centers),
+        &[(14.0_f64 / 3.0).sqrt(), 0.0, 0.0],
+        EPS,
+    );
+    // centered maxabs col0: max(|1−4/3|, |3−4/3|, implicit |0−4/3|) = 5/3
+    assert_close(
+        &m.col_maxabs_centered(&centers),
+        &[5.0 / 3.0, 0.0, 0.0],
+        EPS,
+    );
+}
+
+/// (6): a constant column (sd 0) is floored to scale 1 → finite output.
+fn zero_scale_guard<M, V>(
+    build: &impl Fn(&TestMatrix) -> M,
+    to_v: &impl Fn(&[f64]) -> V,
+    from_v: &impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVec<V> + MatTransposeVec<V> + ColumnStats<f64>,
+    V: Clone
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    // Middle column is empty (all zero) → sd 0; last column constant → sd 0.
+    let tm = TestMatrix {
+        nrows: 3,
+        ncols: 3,
+        dense: vec![
+            vec![1.0, 0.0, 4.0],
+            vec![2.0, 0.0, 4.0],
+            vec![3.0, 0.0, 4.0],
+        ],
+        triplets: vec![
+            (0, 0, 1.0),
+            (1, 0, 2.0),
+            (2, 0, 3.0),
+            (0, 2, 4.0),
+            (1, 2, 4.0),
+            (2, 2, 4.0),
+        ],
+    };
+    let spec = Normalization::new(Centering::Mean, Scaling::Sd);
+    let lazy = LazyMatrix::normalized(build(&tm), tm.nrows, tm.ncols, spec);
+    let scales = lazy.scales().unwrap();
+    assert_eq!(scales[1], 1.0, "empty column scale must be floored to 1");
+    assert_eq!(scales[2], 1.0, "constant column scale must be floored to 1");
+
+    let v = to_v(&random_vec(20, tm.ncols));
+    let y = from_v(&lazy.matvec(&v));
+    assert!(y.iter().all(|x| x.is_finite()), "output must be finite");
+}
