@@ -52,6 +52,20 @@ pub(crate) fn sparse_column_sd<F: Scalar>(values: &[F], nrows: usize) -> F {
     variance.sqrt()
 }
 
+/// Returns the maximum of nonnegative values without masking `NaN` entries.
+#[cfg(any(feature = "faer", feature = "nalgebra"))]
+pub(crate) fn max_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
+    values.fold(F::zero(), |maximum, value| {
+        if maximum.is_nan() || value.is_nan() {
+            F::nan()
+        } else if value > maximum {
+            value
+        } else {
+            maximum
+        }
+    })
+}
+
 /// Dimensions of a matrix or linear operator.
 pub trait MatrixShape {
     fn nrows(&self) -> usize;
@@ -117,6 +131,10 @@ pub trait ScaledSubSlice<F: Scalar> {
 /// All means and standard deviations use the **population** convention (divide
 /// by `n`, the number of rows), matching the design-matrix normalization used by
 /// the R `lazymatrix` package.
+///
+/// Statistics follow IEEE floating-point behavior. In particular, means and
+/// standard deviations of a zero-row column are `NaN`, and a stored `NaN`
+/// propagates through every statistic.
 pub trait ColumnStats<F: Scalar> {
     /// Column means `c_j = (Σ_i x_ij) / n`.
     fn col_means(&self) -> Vec<F>;

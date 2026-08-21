@@ -13,7 +13,7 @@ use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
 use crate::traits::{
     ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SubScalarAssign, SumEntries, sparse_column_sd,
+    ScaledSubSlice, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on DVector<F> ---------------------------------------------
@@ -148,10 +148,7 @@ where
         (0..self.ncols())
             .map(|j| {
                 let (start, end) = (col_offsets[j], col_offsets[j + 1]);
-                values[start..end]
-                    .iter()
-                    .map(|v| v.abs())
-                    .fold(F::zero(), |m, a| if a > m { a } else { m })
+                max_or_nan(values[start..end].iter().map(|v| v.abs()))
             })
             .collect()
     }
@@ -199,15 +196,15 @@ where
             .map(|j| {
                 let (start, end) = (col_offsets[j], col_offsets[j + 1]);
                 let c = centers[j];
-                let stored_max = values[start..end]
-                    .iter()
-                    .map(|&v| (v - c).abs())
-                    .fold(F::zero(), |m, a| if a > m { a } else { m });
                 if end - start < nrows {
-                    let ac = c.abs();
-                    if ac > stored_max { ac } else { stored_max }
+                    max_or_nan(
+                        values[start..end]
+                            .iter()
+                            .map(|&v| (v - c).abs())
+                            .chain(std::iter::once(c.abs())),
+                    )
                 } else {
-                    stored_max
+                    max_or_nan(values[start..end].iter().map(|&v| (v - c).abs()))
                 }
             })
             .collect()

@@ -22,10 +22,15 @@ state and solver-specific update logic belong in consuming crates.
     values near `1e12` whose true variance is nonzero.
   - Apply the same algorithm and edge-case policy to every backend.
 
-- [ ] Define the policy for empty matrices and nonfinite statistics.
-  - Decide whether normalization of a matrix with zero rows is rejected.
-  - Decide how `NaN` and infinite input values propagate or fail.
-  - Document and test the chosen behavior.
+- [x] Define the policy for empty matrices and nonfinite statistics.
+  - Allow normalization of matrices with zero rows. Undefined means and
+    standard deviations are `NaN`; zero L2 and max-absolute scales use the
+    degenerate-column convention below.
+  - Follow IEEE behavior for nonfinite values instead of rejecting them. Ensure
+    aggregations propagate `NaN` rather than accidentally masking it.
+  - Replace only exact computed zero scales with `1`, leaving nonfinite scales
+    untouched. Such degenerate columns are left unscaled.
+  - Document and test the behavior for every backend.
 
 - [ ] Validate explicit normalization parameters.
   - Decide whether scales must be finite and strictly positive or merely

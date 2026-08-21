@@ -12,7 +12,7 @@ use faer::{Accum, Col, Par};
 
 use crate::traits::{
     ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SubScalarAssign, SumEntries, sparse_column_sd,
+    ScaledSubSlice, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on Col<F> (scalar arithmetic only: bound F: Scalar) -------
@@ -155,10 +155,7 @@ where
         (0..self.ncols())
             .map(|j| {
                 let (start, end) = (col_ptr[j], col_ptr[j + 1]);
-                vals[start..end]
-                    .iter()
-                    .map(|v| v.abs())
-                    .fold(F::zero(), |m, a| if a > m { a } else { m })
+                max_or_nan(vals[start..end].iter().map(|v| v.abs()))
             })
             .collect()
     }
@@ -210,16 +207,16 @@ where
             .map(|j| {
                 let (start, end) = (col_ptr[j], col_ptr[j + 1]);
                 let c = centers[j];
-                let stored_max = vals[start..end]
-                    .iter()
-                    .map(|&v| (v - c).abs())
-                    .fold(F::zero(), |m, a| if a > m { a } else { m });
                 // Implicit zeros contribute |0 − c| = |c|.
                 if end - start < nrows {
-                    let ac = c.abs();
-                    if ac > stored_max { ac } else { stored_max }
+                    max_or_nan(
+                        vals[start..end]
+                            .iter()
+                            .map(|&v| (v - c).abs())
+                            .chain(std::iter::once(c.abs())),
+                    )
                 } else {
-                    stored_max
+                    max_or_nan(vals[start..end].iter().map(|&v| (v - c).abs()))
                 }
             })
             .collect()

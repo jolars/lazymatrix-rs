@@ -154,9 +154,10 @@ where
     /// the *centered* columns (standard deviation is centering-invariant; `L2`
     /// and `MaxAbs` are not, and use the sparse closed-form centered variants).
     ///
-    /// Any non-positive scale (e.g. a constant column whose standard deviation
-    /// is zero) is floored to `1`, so the resulting operator never divides by
-    /// zero.
+    /// An exact zero scale (e.g. a constant column whose standard deviation is
+    /// zero) is replaced with `1`, so the resulting operator never divides by
+    /// zero. Nonfinite statistics retain their IEEE values and propagate through
+    /// subsequent operations.
     pub fn new(data: M, spec: Normalization) -> Self {
         let centers = match spec.center {
             Centering::None => None,
@@ -165,12 +166,12 @@ where
 
         let scales = match spec.scale {
             Scaling::None => None,
-            Scaling::Sd => Some(floor_zeros(data.col_sds())),
-            Scaling::MaxAbs => Some(floor_zeros(match &centers {
+            Scaling::Sd => Some(replace_zero_scales(data.col_sds())),
+            Scaling::MaxAbs => Some(replace_zero_scales(match &centers {
                 Some(c) => data.col_maxabs_centered(c),
                 None => data.col_maxabs(),
             })),
-            Scaling::L2 => Some(floor_zeros(match &centers {
+            Scaling::L2 => Some(replace_zero_scales(match &centers {
                 Some(c) => data.col_l2_centered(c),
                 None => data.col_l2(),
             })),
@@ -193,17 +194,17 @@ where
     }
 }
 
-/// Replace any non-positive (`<= 0`) entry with `1`, leaving others untouched.
+/// Replace exact zero entries with `1`, leaving nonfinite values untouched.
 ///
 /// Mirrors the zero-variance guard used in standard penalized-regression
 /// preprocessing: a constant column has scale `0`, which would otherwise produce
-/// a division by zero; flooring it to `1` makes that column a no-op under
+/// a division by zero; replacing it with `1` makes that column a no-op under
 /// scaling.
-fn floor_zeros<F: Scalar>(mut scales: Vec<F>) -> Vec<F> {
+fn replace_zero_scales<F: Scalar>(mut scales: Vec<F>) -> Vec<F> {
     let one = F::one();
     let zero = F::zero();
     for s in &mut scales {
-        if *s <= zero {
+        if *s == zero {
             *s = one;
         }
     }

@@ -58,8 +58,9 @@ matrix/vector pair; no FFI lives in this crate.
 - `Scalar` is `num-traits::Float`-based and does **not** provide `AddAssign`.
   Accumulate with iterator `.sum()` / fold, not `x += y` (clippy's
   `assign_op_pattern` suggestion would not compile here).
-- Scales are floored at 1 (`floor_zeros`) so a constant/zero-variance column
-  never divides by zero.
+- Exact zero scales are replaced with 1 (`replace_zero_scales`) so a
+  constant/zero-variance column never divides by zero. Nonfinite statistics
+  retain their IEEE values.
 - When both centering and scaling are on, scales come from the **centered**
   column. `sd` is centering-invariant; `l2`/`maxabs` use the sparse closed-form
   `*_centered` variants (`‖x_j − c_j‖₂² = Σ_stored (v − c_j)² + (n − nnz_j)·c_j²`).

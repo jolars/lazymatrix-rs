@@ -130,7 +130,53 @@ pub fn run_backend_suite<M, V>(
     column_stats_fixed(&build);
     column_sds_large_offset(&build);
     zero_scale_guard(&build, &to_v, &from_v);
+    empty_and_nonfinite_stats(&build);
     shape_is_inferred(&build);
+}
+
+/// Empty columns use IEEE results where a statistic is undefined, while
+/// nonfinite stored values are never hidden by an aggregation.
+fn empty_and_nonfinite_stats<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: ColumnStats<f64> + MatrixShape,
+{
+    let no_rows = TestMatrix {
+        nrows: 0,
+        ncols: 2,
+        dense: Vec::new(),
+        triplets: Vec::new(),
+    };
+    let matrix = build(&no_rows);
+    assert!(matrix.col_means().iter().all(|value| value.is_nan()));
+    assert!(matrix.col_sds().iter().all(|value| value.is_nan()));
+    assert_eq!(matrix.col_maxabs(), vec![0.0, 0.0]);
+    assert_eq!(matrix.col_l2(), vec![0.0, 0.0]);
+
+    let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd));
+    assert!(lazy.centers().unwrap().iter().all(|value| value.is_nan()));
+    assert!(lazy.scales().unwrap().iter().all(|value| value.is_nan()));
+
+    let nan_column = TestMatrix {
+        nrows: 2,
+        ncols: 1,
+        dense: vec![vec![f64::NAN], vec![1.0]],
+        triplets: vec![(0, 0, f64::NAN), (1, 0, 1.0)],
+    };
+    let matrix = build(&nan_column);
+    assert!(matrix.col_means()[0].is_nan());
+    assert!(matrix.col_sds()[0].is_nan());
+    assert!(matrix.col_maxabs()[0].is_nan());
+    assert!(matrix.col_l2()[0].is_nan());
+    assert!(matrix.col_l2_centered(&[0.0])[0].is_nan());
+    assert!(matrix.col_maxabs_centered(&[0.0])[0].is_nan());
+
+    let implicit_zero = TestMatrix {
+        nrows: 2,
+        ncols: 1,
+        dense: vec![vec![1.0], vec![0.0]],
+        triplets: vec![(0, 0, 1.0)],
+    };
+    assert!(build(&implicit_zero).col_maxabs_centered(&[f64::NAN])[0].is_nan());
 }
 
 /// Standard deviations retain small variation around a large offset.
