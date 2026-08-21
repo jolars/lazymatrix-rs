@@ -5,6 +5,7 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Lazy normalized design matrices: apply column centering/scaling without materializing (X - 1cᵀ)S⁻¹, preserving sparsity."
 repository = "https://github.com/jolars/lazymatrix-rs"
+rust-version = "1.87.0"
 
 [dependencies]
 num-traits = { version = "0.2", default-features = false, features = ["std"] }
