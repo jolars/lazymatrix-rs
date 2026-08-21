@@ -31,9 +31,10 @@ Centering and scaling are each independently optional.
 - `src/traits.rs` — the whole trait surface:
   - `Scalar` — blanket-impl bundle of `num-traits` bounds (`f32`/`f64` qualify).
   - `MatVec` / `MatTransposeVec` — the matrix-free operator pair.
-  - Five vector primitives (`ElemDivAssign`, `DotSlice`, `SubScalarAssign`,
-    `SumEntries`, `ScaledSubSlice`), phrased as a backend vector against a
-    coefficient slice `&[F]`.
+  - Solver-facing vector algebra (`DotProduct`, `L2Norm`, `ScaledAddAssign`,
+    `ScaleAssign`) plus five normalization primitives (`ElemDivAssign`,
+    `DotSlice`, `SubScalarAssign`, `SumEntries`, `ScaledSubSlice`), with the
+    latter phrased as a backend vector against a coefficient slice `&[F]`.
   - `ColumnStats` — column means/sds/maxabs/l2 (+ centered variants), computed
     over stored sparse entries without densifying.
   - `SparseColumns` — zero-copy access to contiguous CSC column slices.

@@ -1,6 +1,6 @@
 //! `nalgebra` sparse backend (feature `nalgebra`).
 //!
-//! Implements the five vector traits on [`nalgebra::DVector`] and the operator,
+//! Implements the vector traits on [`nalgebra::DVector`] and the operator,
 //! statistics, and sparse-column traits on [`nalgebra_sparse::CscMatrix`]. The
 //! matrix–vector products delegate to `spmm_csc_dense` (`Op::NoOp` /
 //! `Op::Transpose`); the transpose never materializes. Column statistics and
@@ -13,11 +13,48 @@ use nalgebra_sparse::ops::Op;
 use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
 use crate::traits::{
-    ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SparseColumns, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
+    ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec, MatrixShape,
+    Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign,
+    SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on DVector<F> ---------------------------------------------
+
+impl<F> DotProduct<F> for DVector<F>
+where
+    F: Scalar + nalgebra::RealField,
+{
+    fn dot(&self, other: &Self) -> F {
+        DVector::dot(self, other)
+    }
+}
+
+impl<F> L2Norm<F> for DVector<F>
+where
+    F: Scalar + nalgebra::RealField,
+{
+    fn norm_l2(&self) -> F {
+        self.norm()
+    }
+}
+
+impl<F> ScaledAddAssign<F> for DVector<F>
+where
+    F: Scalar + nalgebra::RealField,
+{
+    fn scaled_add_assign(&mut self, alpha: F, other: &Self) {
+        self.axpy(alpha, other, F::one());
+    }
+}
+
+impl<F> ScaleAssign<F> for DVector<F>
+where
+    F: Scalar + nalgebra::RealField,
+{
+    fn scale_assign(&mut self, alpha: F) {
+        self.scale_mut(alpha);
+    }
+}
 
 impl<F: Scalar + nalgebra::Scalar> ElemDivAssign<F> for DVector<F> {
     fn elem_div_assign(&mut self, coeffs: &[F]) {

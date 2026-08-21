@@ -7,7 +7,9 @@
 //! * [`MatrixShape`] and [`MatVec`] / [`MatTransposeVec`] — the matrix-free
 //!   linear-operator interface, implemented both by concrete backend matrices
 //!   and by [`LazyMatrix`](crate::LazyMatrix) itself.
-//! * The five *vector* traits ([`ElemDivAssign`], [`DotSlice`],
+//! * Solver-facing vector algebra ([`DotProduct`], [`L2Norm`],
+//!   [`ScaledAddAssign`], and [`ScaleAssign`]).
+//! * The five normalization-specific *vector* traits ([`ElemDivAssign`], [`DotSlice`],
 //!   [`SubScalarAssign`], [`SumEntries`], [`ScaledSubSlice`]) — the elementwise
 //!   primitives that fold the lazy normalization into a backend vector. They are
 //!   phrased as a backend vector against a coefficient slice `&[F]`, which is
@@ -84,6 +86,34 @@ pub trait MatVec<V>: MatrixShape {
 /// of length `ncols`.
 pub trait MatTransposeVec<V>: MatrixShape {
     fn mat_transpose_vec(&self, x: &V) -> V;
+}
+
+/// Dot product of two backend vectors: `Σ self[i] · other[i]`.
+///
+/// # Panics
+///
+/// Panics if the vectors have different lengths.
+pub trait DotProduct<F: Scalar> {
+    fn dot(&self, other: &Self) -> F;
+}
+
+/// Euclidean norm of a backend vector.
+pub trait L2Norm<F: Scalar> {
+    fn norm_l2(&self) -> F;
+}
+
+/// In-place scaled vector addition: `self += alpha · other`.
+///
+/// # Panics
+///
+/// Panics if the vectors have different lengths.
+pub trait ScaledAddAssign<F: Scalar> {
+    fn scaled_add_assign(&mut self, alpha: F, other: &Self);
+}
+
+/// In-place vector scaling: `self *= alpha`.
+pub trait ScaleAssign<F: Scalar> {
+    fn scale_assign(&mut self, alpha: F);
 }
 
 /// Borrowed access to columns stored contiguously in sparse form.

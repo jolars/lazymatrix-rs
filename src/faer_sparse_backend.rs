@@ -1,6 +1,6 @@
 //! `faer` sparse backend (feature `faer`).
 //!
-//! Implements the five vector traits on [`faer::Col`] and the operator,
+//! Implements the vector traits on [`faer::Col`] and the operator,
 //! statistics, and sparse-column traits on [`faer::sparse::SparseColMat`]. The
 //! matrix–vector products delegate to faer's `sparse_dense_matmul`; the
 //! transpose uses a transposed *view* (`as_ref().transpose()`) and never
@@ -12,11 +12,49 @@ use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::{Accum, Col, Par};
 
 use crate::traits::{
-    ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SparseColumns, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
+    ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec, MatrixShape,
+    Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign,
+    SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on Col<F> (scalar arithmetic only: bound F: Scalar) -------
+
+impl<F: Scalar> DotProduct<F> for Col<F> {
+    fn dot(&self, other: &Self) -> F {
+        assert_eq!(self.nrows(), other.nrows(), "dot: length mismatch");
+        (0..self.nrows()).map(|i| self[i] * other[i]).sum()
+    }
+}
+
+impl<F> L2Norm<F> for Col<F>
+where
+    F: Scalar + faer_traits::RealField,
+{
+    fn norm_l2(&self) -> F {
+        self.as_ref().norm_l2()
+    }
+}
+
+impl<F: Scalar> ScaledAddAssign<F> for Col<F> {
+    fn scaled_add_assign(&mut self, alpha: F, other: &Self) {
+        assert_eq!(
+            self.nrows(),
+            other.nrows(),
+            "scaled_add_assign: length mismatch"
+        );
+        for i in 0..self.nrows() {
+            self[i] = self[i] + alpha * other[i];
+        }
+    }
+}
+
+impl<F: Scalar> ScaleAssign<F> for Col<F> {
+    fn scale_assign(&mut self, alpha: F) {
+        for i in 0..self.nrows() {
+            self[i] = self[i] * alpha;
+        }
+    }
+}
 
 impl<F: Scalar> ElemDivAssign<F> for Col<F> {
     fn elem_div_assign(&mut self, coeffs: &[F]) {

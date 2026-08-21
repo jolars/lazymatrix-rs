@@ -15,31 +15,12 @@
 
 use faer::Col;
 use faer::sparse::{SparseColMat, Triplet};
-use lazymatrix::{Centering, LazyMatrix, MatTransposeVec, MatVec, Normalization, Scaling};
+use lazymatrix::{
+    Centering, DotProduct, LazyMatrix, MatTransposeVec, MatVec, Normalization, ScaleAssign,
+    ScaledAddAssign, Scaling,
+};
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
-
-// --- tiny dense-vector helpers on faer Col (the solver's vector algebra) ------
-
-fn dot(a: &Col<f64>, b: &Col<f64>) -> f64 {
-    (0..a.nrows()).map(|i| a[i] * b[i]).sum()
-}
-
-fn norm2(a: &Col<f64>) -> f64 {
-    dot(a, a).sqrt()
-}
-
-/// `y += alpha * x`
-fn axpy(alpha: f64, x: &Col<f64>, y: &mut Col<f64>) {
-    for i in 0..y.nrows() {
-        y[i] += alpha * x[i];
-    }
-}
-
-/// `a - b`
-fn sub(a: &Col<f64>, b: &Col<f64>) -> Col<f64> {
-    Col::from_fn(a.nrows(), |i| a[i] - b[i])
-}
 
 // --- solver pieces, generic over any lazy/backend linear operator -------------
 
@@ -53,14 +34,12 @@ where
     let mut lambda = 1.0;
     for _ in 0..iters {
         let av = op.mat_transpose_vec(&op.matvec(&v)); // AᵀA v
-        lambda = norm2(&av);
+        lambda = av.norm_l2();
         if lambda == 0.0 {
             break;
         }
-        let inv = 1.0 / lambda;
-        for i in 0..ncols {
-            v[i] = av[i] * inv;
-        }
+        v = av;
+        v.scale_assign(1.0 / lambda);
     }
     lambda
 }
@@ -80,13 +59,14 @@ where
     let mut beta = Col::<f64>::zeros(ncols);
     let mut last = f64::INFINITY;
     for k in 0..max_iter {
-        let resid = sub(&op.matvec(&beta), y); // Aβ − y
+        let mut resid = op.matvec(&beta);
+        resid.scaled_add_assign(-1.0, y); // Aβ − y
         let grad = op.mat_transpose_vec(&resid); // Aᵀ(Aβ − y)
-        let gnorm = norm2(&grad);
+        let gnorm = grad.norm_l2();
         if gnorm < tol {
             return (beta, k, gnorm);
         }
-        axpy(-step, &grad, &mut beta);
+        beta.scaled_add_assign(-step, &grad);
         last = gnorm;
     }
     (beta, max_iter, last)
@@ -120,10 +100,13 @@ fn main() {
 
     let (beta, iters, gnorm) = gradient_descent(&lazy, &y, ncols, step, 50_000, 1e-10);
 
-    let err = norm2(&sub(&beta, &beta_star));
+    let mut coefficient_error = beta.clone();
+    coefficient_error.scaled_add_assign(-1.0, &beta_star);
+    let err = coefficient_error.norm_l2();
     let loss = 0.5 * {
-        let r = sub(&lazy.matvec(&beta), &y);
-        dot(&r, &r)
+        let mut r = lazy.matvec(&beta);
+        r.scaled_add_assign(-1.0, &y);
+        r.dot(&r)
     };
     println!("converged in {iters} iters, ‖grad‖ = {gnorm:.3e}");
     println!("‖β − β*‖ = {err:.3e}, ½‖X̃β − y‖² = {loss:.3e}");

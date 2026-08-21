@@ -5,9 +5,9 @@
 #![allow(dead_code)]
 
 use lazymatrix::{
-    Centering, ColumnStats, DotSlice, ElemDivAssign, LazyColumn, LazyMatrix, MatTransposeVec,
-    MatVec, MatrixShape, Normalization, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign,
-    SumEntries,
+    Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, LazyColumn, LazyMatrix,
+    MatTransposeVec, MatVec, MatrixShape, Normalization, ScaleAssign, ScaledAddAssign,
+    ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign, SumEntries,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -118,12 +118,17 @@ pub fn run_backend_suite<M, V>(
 ) where
     M: MatVec<V> + MatTransposeVec<V> + ColumnStats<f64>,
     V: Clone
+        + DotProduct<f64>
+        + L2Norm<f64>
+        + ScaledAddAssign<f64>
+        + ScaleAssign<f64>
         + ElemDivAssign<f64>
         + DotSlice<f64>
         + SubScalarAssign<f64>
         + SumEntries<f64>
         + ScaledSubSlice<f64>,
 {
+    vector_algebra(&to_v, &from_v);
     oracle_parity(&build, &to_v, &from_v);
     adjoint_identity(&build, &to_v, &from_v);
     from_parts_passthrough(&build, &to_v, &from_v);
@@ -133,6 +138,36 @@ pub fn run_backend_suite<M, V>(
     zero_scale_guard(&build, &to_v, &from_v);
     empty_and_nonfinite_stats(&build);
     shape_is_inferred(&build);
+}
+
+fn vector_algebra<V>(to_v: &impl Fn(&[f64]) -> V, from_v: &impl Fn(&V) -> Vec<f64>)
+where
+    V: DotProduct<f64> + L2Norm<f64> + ScaledAddAssign<f64> + ScaleAssign<f64>,
+{
+    let a = to_v(&[1.0, -2.0, 3.0]);
+    let b = to_v(&[4.0, 5.0, -6.0]);
+    approx::assert_abs_diff_eq!(a.dot(&b), -24.0, epsilon = EPS);
+    approx::assert_abs_diff_eq!(a.norm_l2(), 14.0_f64.sqrt(), epsilon = EPS);
+
+    let mut updated = to_v(&[1.0, -2.0, 3.0]);
+    updated.scaled_add_assign(-0.5, &b);
+    assert_close(&from_v(&updated), &[-1.0, -4.5, 6.0], EPS);
+    updated.scale_assign(-2.0);
+    assert_close(&from_v(&updated), &[2.0, 9.0, -12.0], EPS);
+
+    let empty = to_v(&[]);
+    approx::assert_abs_diff_eq!(empty.dot(&empty), 0.0, epsilon = EPS);
+    approx::assert_abs_diff_eq!(empty.norm_l2(), 0.0, epsilon = EPS);
+
+    let short = to_v(&[1.0]);
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| a.dot(&short))).is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut target = to_v(&[1.0, 2.0]);
+            target.scaled_add_assign(1.0, &short);
+        }))
+        .is_err()
+    );
 }
 
 /// Run the verification suite for backends with contiguous sparse columns.

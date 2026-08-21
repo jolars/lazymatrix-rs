@@ -46,8 +46,9 @@
 pub mod traits;
 
 pub use traits::{
-    Centering, ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape,
-    Normalization, Scalar, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign, SumEntries,
+    Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec,
+    MatrixShape, Normalization, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, Scaling,
+    SparseColumns, SubScalarAssign, SumEntries,
 };
 
 #[cfg(feature = "faer")]
