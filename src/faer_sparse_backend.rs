@@ -1,10 +1,11 @@
 //! `faer` sparse backend (feature `faer`).
 //!
-//! Implements the five vector traits on [`faer::Col`] and the operator/stats
-//! traits on [`faer::sparse::SparseColMat`]. The matrix–vector products delegate
-//! to faer's `sparse_dense_matmul`; the transpose uses a transposed *view*
-//! (`as_ref().transpose()`) and never materializes a transposed matrix. Column
-//! statistics walk the CSC arrays directly, treating absent entries as zero.
+//! Implements the five vector traits on [`faer::Col`] and the operator,
+//! statistics, and sparse-column traits on [`faer::sparse::SparseColMat`]. The
+//! matrix–vector products delegate to faer's `sparse_dense_matmul`; the
+//! transpose uses a transposed *view* (`as_ref().transpose()`) and never
+//! materializes a transposed matrix. Column statistics and borrowed column
+//! access use the CSC arrays directly, treating absent entries as zero.
 
 use faer::sparse::SparseColMat;
 use faer::sparse::linalg::matmul::sparse_dense_matmul;
@@ -12,7 +13,7 @@ use faer::{Accum, Col, Par};
 
 use crate::traits::{
     ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
+    ScaledSubSlice, SparseColumns, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on Col<F> (scalar arithmetic only: bound F: Scalar) -------
@@ -73,6 +74,15 @@ impl<F> MatrixShape for SparseColMat<usize, F> {
 
     fn ncols(&self) -> usize {
         self.symbolic().ncols()
+    }
+}
+
+impl<F: Scalar> SparseColumns<F> for SparseColMat<usize, F> {
+    fn sparse_column(&self, j: usize) -> (&[usize], &[F]) {
+        assert!(j < self.ncols(), "column index out of bounds");
+        let start = self.col_ptr()[j];
+        let end = self.col_ptr()[j + 1];
+        (&self.row_idx()[start..end], &self.val()[start..end])
     }
 }
 

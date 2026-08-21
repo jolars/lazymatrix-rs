@@ -5,8 +5,9 @@
 #![allow(dead_code)]
 
 use lazymatrix::{
-    Centering, ColumnStats, DotSlice, ElemDivAssign, LazyMatrix, MatTransposeVec, MatVec,
-    MatrixShape, Normalization, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries,
+    Centering, ColumnStats, DotSlice, ElemDivAssign, LazyColumn, LazyMatrix, MatTransposeVec,
+    MatVec, MatrixShape, Normalization, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign,
+    SumEntries,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -132,6 +133,134 @@ pub fn run_backend_suite<M, V>(
     zero_scale_guard(&build, &to_v, &from_v);
     empty_and_nonfinite_stats(&build);
     shape_is_inferred(&build);
+}
+
+/// Run the verification suite for backends with contiguous sparse columns.
+///
+/// This stays separate from [`run_backend_suite`] because future row-oriented
+/// backends should still implement and test the orientation-agnostic traits.
+pub fn run_sparse_columns_suite<M>(build: impl Fn(&TestMatrix) -> M)
+where
+    M: SparseColumns<f64>,
+{
+    sparse_columns_expose_raw_storage(&build);
+    lazy_columns_match_dense_oracle(&build);
+    empty_and_out_of_bounds_columns(&build);
+}
+
+fn sparse_columns_expose_raw_storage<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: SparseColumns<f64>,
+{
+    let tm = column_view_matrix();
+    let matrix = build(&tm);
+
+    let (rows, values) = matrix.sparse_column(0);
+    assert_eq!(rows, &[0, 2, 3]);
+    assert_eq!(values, &[1.0, 0.0, -2.0]);
+
+    let (rows, values) = matrix.sparse_column(1);
+    assert!(rows.is_empty());
+    assert!(values.is_empty());
+
+    let (rows, values) = matrix.sparse_column(2);
+    assert_eq!(rows, &[0, 1, 2, 3]);
+    assert_eq!(values, &[4.0, 5.0, 6.0, 7.0]);
+
+    let (rows, values) = matrix.sparse_column(3);
+    assert_eq!(rows, &[1]);
+    assert_eq!(values, &[0.0]);
+}
+
+fn lazy_columns_match_dense_oracle<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: SparseColumns<f64>,
+{
+    let tm = column_view_matrix();
+    let centers = vec![0.5, -1.0, 2.0, 3.0];
+    let scales = vec![2.0, 4.0, 0.5, 1.5];
+
+    for &use_center in &[false, true] {
+        for &use_scale in &[false, true] {
+            let active_centers = use_center.then(|| centers.clone());
+            let active_scales = use_scale.then(|| scales.clone());
+            let lazy =
+                LazyMatrix::from_parts(build(&tm), active_centers.clone(), active_scales.clone());
+            let dense = materialize(
+                &tm.dense,
+                active_centers.as_deref(),
+                active_scales.as_deref(),
+            );
+
+            for j in 0..tm.ncols {
+                let column = lazy.column(j);
+                assert_eq!(column.len(), tm.nrows);
+                assert!(!column.is_empty());
+                assert_eq!(
+                    column.center(),
+                    active_centers.as_ref().map_or(0.0, |c| c[j])
+                );
+                assert_eq!(column.scale(), active_scales.as_ref().map_or(1.0, |s| s[j]));
+
+                let expected: Vec<f64> = dense.iter().map(|row| row[j]).collect();
+                assert_close(&reconstruct_column(column), &expected, EPS);
+            }
+        }
+    }
+}
+
+fn empty_and_out_of_bounds_columns<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: SparseColumns<f64>,
+{
+    let no_rows = TestMatrix {
+        nrows: 0,
+        ncols: 2,
+        dense: Vec::new(),
+        triplets: Vec::new(),
+    };
+    let lazy = LazyMatrix::<_, f64>::from_parts(build(&no_rows), None, None);
+    let column = lazy.column(0);
+    assert_eq!(column.len(), 0);
+    assert!(column.is_empty());
+    assert!(column.row_indices().is_empty());
+    assert!(column.values().is_empty());
+    assert_eq!(column.center(), 0.0);
+    assert_eq!(column.scale(), 1.0);
+
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lazy.column(2)));
+    assert!(result.is_err());
+}
+
+fn reconstruct_column(column: LazyColumn<'_, f64>) -> Vec<f64> {
+    let mut dense = vec![-column.center() / column.scale(); column.len()];
+    for (&row, &value) in column.row_indices().iter().zip(column.values()) {
+        dense[row] = (value - column.center()) / column.scale();
+    }
+    dense
+}
+
+fn column_view_matrix() -> TestMatrix {
+    TestMatrix {
+        nrows: 4,
+        ncols: 4,
+        dense: vec![
+            vec![1.0, 0.0, 4.0, 0.0],
+            vec![0.0, 0.0, 5.0, 0.0],
+            vec![0.0, 0.0, 6.0, 0.0],
+            vec![-2.0, 0.0, 7.0, 0.0],
+        ],
+        triplets: vec![
+            (0, 0, 1.0),
+            (2, 0, 0.0),
+            (3, 0, -2.0),
+            (0, 2, 4.0),
+            (1, 2, 5.0),
+            (2, 2, 6.0),
+            (3, 2, 7.0),
+            (1, 3, 0.0),
+        ],
+    }
 }
 
 /// Empty columns use IEEE results where a statistic is undefined, while

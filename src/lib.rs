@@ -47,7 +47,7 @@ pub mod traits;
 
 pub use traits::{
     Centering, ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape,
-    Normalization, Scalar, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries,
+    Normalization, Scalar, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign, SumEntries,
 };
 
 #[cfg(feature = "faer")]
@@ -55,6 +55,63 @@ mod faer_sparse_backend;
 
 #[cfg(feature = "nalgebra")]
 mod nalgebra_sparse_backend;
+
+/// A borrowed view of one lazily normalized sparse column.
+///
+/// The view exposes the underlying matrix's stored row indices and raw values
+/// without copying. Its logical entries are
+///
+/// ```text
+/// stored row:   (value − center) / scale
+/// implicit row: (0 − center) / scale
+/// ```
+///
+/// Thus, a centered logical column is generally dense even though the two
+/// borrowed slices contain only the underlying matrix's stored entries.
+#[derive(Clone, Copy, Debug)]
+pub struct LazyColumn<'a, F> {
+    row_indices: &'a [usize],
+    values: &'a [F],
+    len: usize,
+    center: F,
+    scale: F,
+}
+
+impl<'a, F: Scalar> LazyColumn<'a, F> {
+    /// Row indices of the raw stored entries.
+    pub fn row_indices(&self) -> &'a [usize] {
+        self.row_indices
+    }
+
+    /// Raw stored values from the underlying matrix.
+    pub fn values(&self) -> &'a [F] {
+        self.values
+    }
+
+    /// Logical length of the column, including structurally absent entries.
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Whether the logical column has no rows.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Effective column center.
+    ///
+    /// This is zero when centering is inactive.
+    pub fn center(&self) -> F {
+        self.center
+    }
+
+    /// Effective column scale.
+    ///
+    /// This is one when scaling is inactive.
+    pub fn scale(&self) -> F {
+        self.scale
+    }
+}
 
 /// A matrix presented with lazy column normalization `X̃ = (X − 1cᵀ)S⁻¹`.
 ///
@@ -134,6 +191,30 @@ where
     /// Borrow the underlying (un-normalized) matrix.
     pub fn data(&self) -> &M {
         &self.data
+    }
+
+    /// Borrow one lazily normalized sparse column without copying.
+    ///
+    /// The returned view contains raw stored entries plus the effective center
+    /// and scale needed to interpret both stored and implicit entries. It does
+    /// not materialize the generally dense centered column.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `j >= self.ncols()`.
+    pub fn column(&self, j: usize) -> LazyColumn<'_, F>
+    where
+        M: SparseColumns<F>,
+    {
+        assert!(j < self.ncols(), "column index out of bounds");
+        let (row_indices, values) = self.data.sparse_column(j);
+        LazyColumn {
+            row_indices,
+            values,
+            len: self.nrows(),
+            center: self.centers.as_ref().map_or_else(F::zero, |c| c[j]),
+            scale: self.scales.as_ref().map_or_else(F::one, |s| s[j]),
+        }
     }
 
     /// Consume the wrapper, returning the underlying matrix and the

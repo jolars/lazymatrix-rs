@@ -28,4 +28,5 @@ fn from_col(c: &Col<f64>) -> Vec<f64> {
 #[test]
 fn faer_backend_suite() {
     common::run_backend_suite(build, to_col, from_col);
+    common::run_sparse_columns_suite(build);
 }

@@ -1,10 +1,11 @@
 //! `nalgebra` sparse backend (feature `nalgebra`).
 //!
-//! Implements the five vector traits on [`nalgebra::DVector`] and the
-//! operator/stats traits on [`nalgebra_sparse::CscMatrix`]. The matrix–vector
-//! products delegate to `spmm_csc_dense` (`Op::NoOp` / `Op::Transpose`); the
-//! transpose never materializes. Column statistics walk the CSC arrays via
-//! [`CscMatrix::csc_data`], treating absent entries as zero.
+//! Implements the five vector traits on [`nalgebra::DVector`] and the operator,
+//! statistics, and sparse-column traits on [`nalgebra_sparse::CscMatrix`]. The
+//! matrix–vector products delegate to `spmm_csc_dense` (`Op::NoOp` /
+//! `Op::Transpose`); the transpose never materializes. Column statistics and
+//! borrowed column access use the CSC arrays via [`CscMatrix::csc_data`],
+//! treating absent entries as zero.
 
 use nalgebra::{ClosedAddAssign, ClosedMulAssign, DMatrix, DVector};
 use nalgebra_sparse::CscMatrix;
@@ -13,7 +14,7 @@ use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
 use crate::traits::{
     ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
+    ScaledSubSlice, SparseColumns, SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on DVector<F> ---------------------------------------------
@@ -69,6 +70,16 @@ impl<F> MatrixShape for CscMatrix<F> {
 
     fn ncols(&self) -> usize {
         CscMatrix::ncols(self)
+    }
+}
+
+impl<F: Scalar> SparseColumns<F> for CscMatrix<F> {
+    fn sparse_column(&self, j: usize) -> (&[usize], &[F]) {
+        assert!(j < self.ncols(), "column index out of bounds");
+        let (col_offsets, row_indices, values) = self.csc_data();
+        let start = col_offsets[j];
+        let end = col_offsets[j + 1];
+        (&row_indices[start..end], &values[start..end])
     }
 }
 

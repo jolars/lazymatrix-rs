@@ -14,6 +14,8 @@
 //!   exactly the shape the centering/scaling math needs.
 //! * [`ColumnStats`] — column statistics computed directly over a (possibly
 //!   sparse) backend matrix, used by the `normalized` constructor.
+//! * [`SparseColumns`] — borrowed access to contiguous sparse columns,
+//!   implemented only by backends whose storage orientation supports it.
 
 /// Numeric scalar element type.
 ///
@@ -82,6 +84,23 @@ pub trait MatVec<V>: MatrixShape {
 /// of length `ncols`.
 pub trait MatTransposeVec<V>: MatrixShape {
     fn mat_transpose_vec(&self, x: &V) -> V;
+}
+
+/// Borrowed access to columns stored contiguously in sparse form.
+///
+/// Implement this capability only when a backend can return the stored row
+/// indices and values for one column as slices without gathering or copying.
+/// Structurally absent entries are implicit zeros.
+pub trait SparseColumns<F: Scalar>: MatrixShape {
+    /// Return the stored `(row index, raw value)` slices for column `j`.
+    ///
+    /// The two slices have equal length and corresponding entries. Explicitly
+    /// stored zeros remain present.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `j >= self.ncols()`.
+    fn sparse_column(&self, j: usize) -> (&[usize], &[F]);
 }
 
 /// In-place elementwise division by a coefficient slice: `self[i] /= coeffs[i]`.

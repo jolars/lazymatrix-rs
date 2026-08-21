@@ -36,9 +36,10 @@ Centering and scaling are each independently optional.
     coefficient slice `&[F]`.
   - `ColumnStats` — column means/sds/maxabs/l2 (+ centered variants), computed
     over stored sparse entries without densifying.
+  - `SparseColumns` — zero-copy access to contiguous CSC column slices.
   - `Centering` / `Scaling` / `Normalization`.
-- `src/lib.rs` — `LazyMatrix<M, F = f64>` (generic, dependency-free core),
-  constructors, and the two operator impls.
+- `src/lib.rs` — `LazyMatrix<M, F = f64>` and borrowed `LazyColumn<'a, F>`
+  (generic, dependency-free core), constructors, and the two operator impls.
 - `src/faer_sparse_backend.rs` — `[feature = "faer"]`, impls on
   `SparseColMat<usize, F>` / `Col<F>`.
 - `src/nalgebra_sparse_backend.rs` — `[feature = "nalgebra"]`, impls on
@@ -102,16 +103,14 @@ methods (GD, CG, ISTA/FISTA) need only `matvec`/`mat_transpose_vec`. When a
 consuming algorithm reveals a missing *matrix* capability, add it to the
 operator; never add the *solver* to the lib.
 
-**Coordinate descent — deferred.** CD wants single-column ops
+**Coordinate descent.** The `coordinate_descent` example uses single-column ops
 (`X̃ⱼᵀr = (Xⱼᵀr − cⱼΣr)/sⱼ` and the residual update `r −= Δ·X̃ⱼ`). The dot stays
 O(nnzⱼ) if the solver tracks `Σr` incrementally, but the centered residual
 update carries an O(n) broadcast term (`r[i] += Δcⱼ/sⱼ` for all i). Keeping CD at
-O(nnz) requires the glmnet/sklearn *offset trick*: represent the residual as
+O(nnz) uses the glmnet/sklearn *offset trick*: represent the residual as
 `(stored vector + scalar offset)` so the broadcast is O(1). That choice shapes
-the column-access API — a simple `col_xt_vec`/`col_axpy` pair is clean but O(n)
-when centering, whereas a column view (`(row,value)` entries + `cⱼ`/`sⱼ` +
-`‖X̃ⱼ‖²`, solver-managed offset) preserves sparsity. Decide that fork when CD is
-actually built.
+the column-access API: the borrowed column view exposes raw `(row, value)`
+entries plus `cⱼ`/`sⱼ`, while the solver derives `‖X̃ⱼ‖²` and manages the offset.
 
 ## Column/row access — orientation as a capability
 
@@ -146,8 +145,9 @@ so `SparseRows` is the obvious parallel later.
 
 ## Scope (v1)
 
-In: the operator (`matvec` / `mat_transpose_vec`) + `ColumnStats`, over
-faer-sparse and nalgebra-sparse. Out (deferred, recoverable without rework):
-Gram `X̃ᵀX̃`, norms, SVD, iterative solvers, row normalization, dense/ndarray
-backends, and any FFI. Solvers belong in consuming crates — this crate only
-provides a faithful linear operator.
+In: the operator (`matvec` / `mat_transpose_vec`), `ColumnStats`, and borrowed
+CSC column access, over faer-sparse and nalgebra-sparse. Out (deferred,
+recoverable without rework): Gram `X̃ᵀX̃`, norms, SVD, library-level iterative
+solvers, row normalization, dense/ndarray backends, and any FFI. Solvers belong
+in consuming crates—the runnable examples are consumers, while the library only
+provides a faithful linear operator and storage capabilities.

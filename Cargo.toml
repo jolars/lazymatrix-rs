@@ -34,6 +34,10 @@ rand_chacha = "0.10"
 name = "least_squares_gd"
 required-features = ["faer"]
 
+[[example]]
+name = "coordinate_descent"
+required-features = ["faer"]
+
 [[bench]]
 name = "column_sds"
 harness = false

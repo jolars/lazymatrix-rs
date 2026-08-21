@@ -42,14 +42,14 @@ state and solver-specific update logic belong in consuming crates.
 
 ## Sparse access capabilities
 
-- [ ] Add `SparseColumns` for contiguous CSC column access.
+- [x] Add `SparseColumns` for contiguous CSC column access.
   - Return borrowed row-index and raw-value slices without copying.
   - Implement it only for storage types that provide efficient contiguous
     column access.
   - Keep it separate from `ColumnStats`, which remains
     orientation-independent.
 
-- [ ] Add `LazyMatrix::column` and a borrowed `LazyColumn` view.
+- [x] Add `LazyMatrix::column` and a borrowed `LazyColumn` view.
   - Gate the method on `M: SparseColumns`.
   - Expose row indices, raw stored values, logical length, center, and scale.
   - Use the canonical `center` and `scale` terminology used by `LazyMatrix`;
