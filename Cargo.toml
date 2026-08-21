@@ -11,6 +11,8 @@ authors = [
 ]
 rust-version = "1.87.0"
 readme = "README.md"
+keywords = ["matrix", "sparse", "linear-algebra", "centering", "scaling"]
+categories = ["mathematics", "science", "algorithms"]
 
 [dependencies]
 num-traits = { version = "0.2", default-features = false, features = ["std"] }
