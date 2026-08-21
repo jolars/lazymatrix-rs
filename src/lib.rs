@@ -39,7 +39,7 @@
 //! // `x` is some backend matrix implementing `MatVec`, `MatTransposeVec`,
 //! // `ColumnStats`, `MatrixShape`; `v` a backend vector.
 //! let spec = Normalization::new(Centering::Mean, Scaling::Sd);
-//! let lazy = LazyMatrix::normalized(x, spec);
+//! let lazy = LazyMatrix::new(x, spec);
 //! let y = lazy.matvec(&v); // == ((X − 1cᵀ)S⁻¹) v, sparsity preserved
 //! ```
 
@@ -80,7 +80,7 @@ where
     /// # Panics
     /// Panics if a provided `centers`/`scales` vector does not have length
     /// `ncols`.
-    pub fn new(data: M, centers: Option<Vec<F>>, scales: Option<Vec<F>>) -> Self {
+    pub fn from_parts(data: M, centers: Option<Vec<F>>, scales: Option<Vec<F>>) -> Self {
         let ncols = data.ncols();
         if let Some(c) = &centers {
             assert_eq!(c.len(), ncols, "centers length must equal ncols");
@@ -95,17 +95,12 @@ where
         }
     }
 
-    /// Wrap a matrix with no normalization (a pure pass-through operator).
-    pub fn raw(data: M) -> Self {
-        Self::new(data, None, None)
-    }
-
     /// Wrap a matrix with column centering only.
     ///
     /// # Panics
     /// Panics if `centers.len() != ncols`.
     pub fn with_centers(data: M, centers: Vec<F>) -> Self {
-        Self::new(data, Some(centers), None)
+        Self::from_parts(data, Some(centers), None)
     }
 
     /// Wrap a matrix with column scaling only.
@@ -113,7 +108,7 @@ where
     /// # Panics
     /// Panics if `scales.len() != ncols`.
     pub fn with_scales(data: M, scales: Vec<F>) -> Self {
-        Self::new(data, None, Some(scales))
+        Self::from_parts(data, None, Some(scales))
     }
 
     /// Number of rows of the logical normalized matrix.
@@ -162,7 +157,7 @@ where
     /// Any non-positive scale (e.g. a constant column whose standard deviation
     /// is zero) is floored to `1`, so the resulting operator never divides by
     /// zero.
-    pub fn normalized(data: M, spec: Normalization) -> Self {
+    pub fn new(data: M, spec: Normalization) -> Self {
         let centers = match spec.center {
             Centering::None => None,
             Centering::Mean => Some(data.col_means()),
@@ -181,7 +176,7 @@ where
             })),
         };
 
-        Self::new(data, centers, scales)
+        Self::from_parts(data, centers, scales)
     }
 }
 

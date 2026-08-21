@@ -125,8 +125,8 @@ pub fn run_backend_suite<M, V>(
 {
     oracle_parity(&build, &to_v, &from_v);
     adjoint_identity(&build, &to_v, &from_v);
-    raw_passthrough(&build, &to_v, &from_v);
-    normalized_matches_oracle(&build, &to_v, &from_v);
+    from_parts_passthrough(&build, &to_v, &from_v);
+    new_matches_oracle(&build, &to_v, &from_v);
     column_stats_fixed(&build);
     zero_scale_guard(&build, &to_v, &from_v);
     shape_is_inferred(&build);
@@ -138,12 +138,12 @@ where
     M: MatrixShape,
 {
     let tm = random_matrix(21, 7, 4, 0.3);
-    let lazy = LazyMatrix::<_, f64>::raw(build(&tm));
+    let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), None, None);
     assert_eq!(lazy.nrows(), tm.nrows);
     assert_eq!(lazy.ncols(), tm.ncols);
 
     let no_columns = random_matrix(22, 3, 0, 0.3);
-    let lazy = LazyMatrix::<_, f64>::raw(build(&no_columns));
+    let lazy = LazyMatrix::<_, f64>::from_parts(build(&no_columns), None, None);
     assert_eq!(lazy.nrows(), no_columns.nrows);
     assert_eq!(lazy.ncols(), 0);
 }
@@ -176,7 +176,7 @@ fn oracle_parity<M, V>(
         for &use_s in &[false, true] {
             let c = use_c.then(|| centers.clone());
             let s = use_s.then(|| scales.clone());
-            let lazy = LazyMatrix::new(build(&tm), c.clone(), s.clone());
+            let lazy = LazyMatrix::from_parts(build(&tm), c.clone(), s.clone());
             let xtilde = materialize(&tm.dense, c.as_deref(), s.as_deref());
 
             let got = from_v(&lazy.matvec(&v));
@@ -210,7 +210,7 @@ fn adjoint_identity<M, V>(
         .iter()
         .map(|x| x.abs() + 0.3)
         .collect();
-    let lazy = LazyMatrix::new(build(&tm), Some(centers), Some(scales));
+    let lazy = LazyMatrix::from_parts(build(&tm), Some(centers), Some(scales));
     let v = to_v(&random_vec(9, tm.ncols));
     let u = to_v(&random_vec(10, tm.nrows));
 
@@ -221,8 +221,8 @@ fn adjoint_identity<M, V>(
     approx::assert_abs_diff_eq!(lhs, rhs, epsilon = 1e-9);
 }
 
-/// (3): `raw()` is a bit-exact pass-through to the backend matvec.
-fn raw_passthrough<M, V>(
+/// (3): `from_parts(_, None, None)` is a bit-exact backend pass-through.
+fn from_parts_passthrough<M, V>(
     build: &impl Fn(&TestMatrix) -> M,
     to_v: &impl Fn(&[f64]) -> V,
     from_v: &impl Fn(&V) -> Vec<f64>,
@@ -243,14 +243,14 @@ fn raw_passthrough<M, V>(
     let bare_y = from_v(&bare.matvec(&v));
     let bare_t = from_v(&bare.mat_transpose_vec(&u));
 
-    let lazy = LazyMatrix::raw(build(&tm));
+    let lazy = LazyMatrix::from_parts(build(&tm), None, None);
     assert_eq!(from_v(&lazy.matvec(&v)), bare_y);
     assert_eq!(from_v(&lazy.mat_transpose_vec(&u)), bare_t);
 }
 
-/// `normalized()` with every strategy: read back the computed centers/scales and
+/// `new()` with every strategy: read back the computed centers/scales and
 /// confirm the operator equals the oracle built from those same vectors.
-fn normalized_matches_oracle<M, V>(
+fn new_matches_oracle<M, V>(
     build: &impl Fn(&TestMatrix) -> M,
     to_v: &impl Fn(&[f64]) -> V,
     from_v: &impl Fn(&V) -> Vec<f64>,
@@ -272,7 +272,7 @@ fn normalized_matches_oracle<M, V>(
     for center in centerings {
         for scale in scalings {
             let spec = Normalization::new(center, scale);
-            let lazy = LazyMatrix::normalized(build(&tm), spec);
+            let lazy = LazyMatrix::new(build(&tm), spec);
             let xtilde = materialize(&tm.dense, lazy.centers(), lazy.scales());
 
             let got = from_v(&lazy.matvec(&v));
@@ -368,7 +368,7 @@ fn zero_scale_guard<M, V>(
         ],
     };
     let spec = Normalization::new(Centering::Mean, Scaling::Sd);
-    let lazy = LazyMatrix::normalized(build(&tm), spec);
+    let lazy = LazyMatrix::new(build(&tm), spec);
     let scales = lazy.scales().unwrap();
     assert_eq!(scales[1], 1.0, "empty column scale must be floored to 1");
     assert_eq!(scales[2], 1.0, "constant column scale must be floored to 1");

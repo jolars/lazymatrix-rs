@@ -30,8 +30,8 @@ state and solver-specific update logic belong in consuming crates.
 - [ ] Validate explicit normalization parameters.
   - Decide whether scales must be finite and strictly positive or merely
     finite and nonzero.
-  - Ensure `new` and `with_scales` cannot silently construct an operator that
-    divides by zero.
+  - Ensure `from_parts` and `with_scales` cannot silently construct an operator
+    that divides by zero.
   - Consider a fallible constructor if validation errors should not panic.
   - Ensure the zero-scale guard treats nonfinite values deliberately.
 

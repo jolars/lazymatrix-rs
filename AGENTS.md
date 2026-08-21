@@ -132,7 +132,7 @@ the operator and express it as a capability trait instead:
 `M: SparseRows`, so a column-sweep solver (e.g. CD) bounding `M: SparseColumns`
 fails to *compile* against a CSR matrix rather than silently doing an
 O(nnz)-per-column gather — the same capability-as-bound pattern as
-`normalized()`'s `M: ColumnStats`.
+`new()`'s `M: ColumnStats`.
 
 Views borrow, never copy. `LazyColumn<'a, F>` borrows the raw column slices and
 copies the two scalars `cⱼ`/`sⱼ`; `LazyRow<'a, F>` borrows the raw row slices

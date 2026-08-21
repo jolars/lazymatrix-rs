@@ -39,8 +39,8 @@ fn faer_and_nalgebra_agree() {
         for scale in [Scaling::None, Scaling::Sd, Scaling::MaxAbs, Scaling::L2] {
             let spec = Normalization::new(center, scale);
 
-            let f = LazyMatrix::normalized(faer_mat(&tm), spec);
-            let n = LazyMatrix::normalized(nalg_mat(&tm), spec);
+            let f = LazyMatrix::new(faer_mat(&tm), spec);
+            let n = LazyMatrix::new(nalg_mat(&tm), spec);
 
             let fv = Col::from_fn(v.len(), |i| v[i]);
             let nv = DVector::from_column_slice(&v);
