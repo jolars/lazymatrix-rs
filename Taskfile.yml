@@ -1,0 +1,38 @@
+version: "3"
+
+# Top-level recipes for lazymatrix maintainer workflows.
+# Run `task --list` to see available recipes.
+
+tasks:
+  ci:
+    desc: Run the local equivalent of the GitHub CI checks.
+    cmds:
+      - task: fmt
+      - task: lint
+      - task: docs
+      - task: test
+
+  fmt:
+    desc: Check Rust formatting.
+    cmds:
+      - cargo fmt --all -- --check
+
+  lint:
+    desc: Lint all Rust targets and features.
+    cmds:
+      - cargo clippy --all-features --all-targets --locked -- -D warnings
+
+  docs:
+    desc: Build documentation with warnings denied.
+    env:
+      RUSTDOCFLAGS: -D warnings
+    cmds:
+      - cargo doc --no-deps --all-features --locked
+
+  test:
+    desc: Test the core, each backend, and all features.
+    cmds:
+      - cargo test --locked
+      - cargo test --locked --features nalgebra
+      - cargo test --locked --features faer
+      - cargo test --locked --all-features
