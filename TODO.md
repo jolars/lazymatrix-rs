@@ -83,6 +83,12 @@ state and solver-specific update logic belong in consuming crates.
 
 ## Operator performance
 
+- [ ] Allow `LazyMatrix` to wrap a borrowed backend matrix.
+  - Add forwarding implementations for the matrix capability traits on `&M`,
+    or provide an explicit borrowed wrapper with equivalent ergonomics.
+  - Support construction such as `LazyMatrix::new(&x, spec)` so fitting paths,
+    cross-validation, and prediction do not need to consume the design matrix.
+
 - [ ] Evaluate reusable-output operator methods before stabilizing the traits.
   - Prototype `matvec_into` and `mat_transpose_vec_into` as additive
     capabilities or as the primitive operator interface.
@@ -93,6 +99,78 @@ state and solver-specific update logic belong in consuming crates.
 - [ ] Avoid cloning the forward input when scaling is inactive.
   - Preserve the direct backend path for raw and center-only products.
   - Benchmark before adding more elaborate scratch-storage machinery.
+
+- [ ] Add multiple-right-hand-side operator capabilities.
+  - Prototype `MatMat` and `MatTransposeMat` for multiresponse and multinomial
+    consumers rather than requiring one allocation and backend call per
+    response.
+  - Fold normalization into the batched products using the same identities as
+    `MatVec` and `MatTransposeVec`.
+  - Keep the capability independent of any response, loss, or solver type.
+
+## SLOPE rewrite support
+
+These items come from comparing the normalization code in `../libslope` with
+the current operator and column-view API. The JIT-normalization enum and its
+four-way branches should not be ported: optional centers and scales already
+represent the same four states.
+
+- [ ] Add weighted logical-column products.
+  - Provide a weighted dot product for
+    `x_tilde_j^T (weights * vector)` without materializing the elementwise
+    product.
+  - Provide a weighted squared norm `sum_i weights_i * x_tilde_ij^2` for
+    coordinate-wise Hessian calculations.
+  - Offer variants accepting cached `sum(weights * vector)` and
+    `sum(weights)` so repeated column operations remain O(nnz_j).
+  - Accept borrowed inputs without forcing copies of dense matrix columns;
+    account explicitly for contiguous versus strided vector views.
+  - Test each formula against a dense oracle for all four center/scale
+    combinations, including implicit and explicitly stored zeros.
+
+- [ ] Make the sparse-plus-offset decomposition of `LazyColumn` easier to use.
+  - Consider accessors such as `implicit_value()` (`-center / scale`),
+    `raw_sum()`, and an iterator over stored corrections (`raw_value / scale`).
+  - Keep these as representation-level column operations. Residual offsets,
+    cached residual sums, and coordinate-update policy remain in the consuming
+    solver.
+  - Use the coordinate-descent example to verify that a centered residual
+    update can stay O(nnz_j) without rederiving normalization formulas.
+
+- [ ] Add the remaining normalization statistics used by `libslope`.
+  - Add minimum centering and L1 and range scaling.
+  - Extend `ColumnStats` with sparse-aware minima, ranges, L1 norms, and
+    centered L1 norms. Implicit zeros must participate in every statistic.
+  - Use the sparse closed form
+    `sum_stored |value - center| + (n - nnz) * |center|` for centered L1 norms.
+  - Preserve the current rule that non-translation-invariant scales such as L1,
+    L2, and max-absolute are computed after centering. `libslope` computes its
+    scales from raw `X`; exact legacy behavior for unusual combinations can be
+    reproduced with `from_parts`.
+
+- [ ] Add dense backends when work on the Rust SLOPE consumer begins.
+  - Implement the orientation-independent operator and statistics traits for
+    the selected faer and/or nalgebra dense matrix types.
+  - Provide borrowed dense-column access without weakening the contract of
+    `SparseColumns`.
+  - Share logical-column operations across dense and sparse views where their
+    complexity contracts remain honest.
+
+- [ ] Benchmark active-set products before adding a restricted-operator API.
+  - Full gradients map directly to `MatTransposeVec`, and active-set gradients
+    can be computed through `LazyColumn` views.
+  - Add a restricted `matvec` or transpose product only if working-set and
+    screening benchmarks show that zero-filled full products are a bottleneck.
+  - Do not encode flattened feature-response indices or SLOPE working-set
+    policy in the matrix API.
+
+- [ ] Pressure-test signed combinations of normalized columns in the SLOPE
+      consumer.
+  - Build cluster directions from `LazyColumn` views into a consumer-owned
+    sparse-plus-offset workspace instead of materializing a normalized sparse
+    matrix for every cluster.
+  - Promote a general column-combination abstraction into this crate only if a
+    second non-SLOPE consumer establishes a reusable contract.
 
 ## Submatrices
 
@@ -131,3 +209,9 @@ state and solver-specific update logic belong in consuming crates.
   solver-specific state or update operations.
 - Arbitrary affine-expression machinery is deferred until more transformations
   than column centering and scaling require it.
+- Intercept fitting, coefficient rescaling, working and strong sets, screening,
+  KKT policy, SLOPE clusters, and cluster merging or splitting remain in the
+  consuming model crate.
+- Dense in-place normalization and a `modify_x` mode are not part of the lazy
+  operator. Consumers that deliberately materialize normalized dense data can
+  do so outside this crate.
