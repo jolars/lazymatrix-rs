@@ -33,6 +33,51 @@ pub trait Scalar:
 {
 }
 
+/// `Send` when parallelism is enabled, and unconstrained otherwise.
+#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+pub(crate) trait MaybeSend: Send {}
+
+#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+impl<T: Send + ?Sized> MaybeSend for T {}
+
+#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+pub(crate) trait MaybeSend {}
+
+#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+impl<T: ?Sized> MaybeSend for T {}
+
+/// `Sync` when parallelism is enabled, and unconstrained otherwise.
+#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+pub(crate) trait MaybeSync: Sync {}
+
+#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+impl<T: Sync + ?Sized> MaybeSync for T {}
+
+#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+pub(crate) trait MaybeSync {}
+
+#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+impl<T: ?Sized> MaybeSync for T {}
+
+#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+pub(crate) fn collect_columns<T, Map>(ncols: usize, map: Map) -> Vec<T>
+where
+    T: MaybeSend,
+    Map: Fn(usize) -> T + MaybeSend + MaybeSync,
+{
+    use rayon::prelude::*;
+    (0..ncols).into_par_iter().map(map).collect()
+}
+
+#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+pub(crate) fn collect_columns<T, Map>(ncols: usize, map: Map) -> Vec<T>
+where
+    T: MaybeSend,
+    Map: Fn(usize) -> T + MaybeSend + MaybeSync,
+{
+    (0..ncols).map(map).collect()
+}
+
 impl<F> Scalar for F where
     F: num_traits::Float
         + num_traits::FromPrimitive

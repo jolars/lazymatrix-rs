@@ -30,6 +30,8 @@
 //!   [`faer::Col`].
 //! * `nalgebra` — [`nalgebra::DMatrix`] and [`nalgebra_sparse::CscMatrix`] over
 //!   [`nalgebra::DVector`].
+//! * `parallel` — parallel column statistics through Rayon and parallel Faer
+//!   sparse matrix–vector products when the `faer` feature is also enabled.
 //!
 //! Any type implementing the [`traits`] surface (a dense matrix, say) works too.
 //!

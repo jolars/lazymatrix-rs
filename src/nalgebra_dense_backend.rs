@@ -4,8 +4,8 @@ use nalgebra::base::storage::{RawStorage, RawStorageMut};
 use nalgebra::{DVector, Dim, Matrix, MatrixView, U1};
 
 use crate::traits::{
-    ColumnStats, MatTransposeVec, MatVec, MatrixShape, RawColumn, RawColumns, Scalar, VectorView,
-    VectorViewMut, max_or_nan, min_or_nan, range_or_nan,
+    ColumnStats, MatTransposeVec, MatVec, MatrixShape, MaybeSend, MaybeSync, RawColumn, RawColumns,
+    Scalar, VectorView, VectorViewMut, collect_columns, max_or_nan, min_or_nan, range_or_nan,
 };
 
 impl<F, R, S> VectorView<F> for Matrix<F, R, U1, S>
@@ -141,68 +141,64 @@ where
 
 impl<F, R, C, S> ColumnStats<F> for Matrix<F, R, C, S>
 where
-    F: Scalar + nalgebra::Scalar,
+    F: Scalar + nalgebra::Scalar + MaybeSend + MaybeSync,
     R: Dim,
     C: Dim,
-    S: RawStorage<F, R, C>,
+    S: RawStorage<F, R, C> + MaybeSync,
 {
     fn col_means(&self) -> Vec<F> {
         let n = F::from_usize(self.nrows()).unwrap();
-        (0..self.ncols())
-            .map(|j| (0..self.nrows()).map(|i| self[(i, j)]).sum::<F>() / n)
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            (0..self.nrows()).map(|i| self[(i, j)]).sum::<F>() / n
+        })
     }
 
     fn col_sds(&self) -> Vec<F> {
         let centers = self.col_means();
         let n = F::from_usize(self.nrows()).unwrap();
-        (0..self.ncols())
-            .map(|j| {
-                ((0..self.nrows())
-                    .map(|i| {
-                        let deviation = self[(i, j)] - centers[j];
-                        deviation * deviation
-                    })
-                    .sum::<F>()
-                    / n)
-                    .sqrt()
-            })
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            ((0..self.nrows())
+                .map(|i| {
+                    let deviation = self[(i, j)] - centers[j];
+                    deviation * deviation
+                })
+                .sum::<F>()
+                / n)
+                .sqrt()
+        })
     }
 
     fn col_mins(&self) -> Vec<F> {
-        (0..self.ncols())
-            .map(|j| min_or_nan((0..self.nrows()).map(|i| self[(i, j)])))
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            min_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
+        })
     }
 
     fn col_ranges(&self) -> Vec<F> {
-        (0..self.ncols())
-            .map(|j| range_or_nan((0..self.nrows()).map(|i| self[(i, j)])))
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            range_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
+        })
     }
 
     fn col_maxabs(&self) -> Vec<F> {
-        (0..self.ncols())
-            .map(|j| max_or_nan((0..self.nrows()).map(|i| self[(i, j)].abs())))
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            max_or_nan((0..self.nrows()).map(|i| self[(i, j)].abs()))
+        })
     }
 
     fn col_l1(&self) -> Vec<F> {
-        (0..self.ncols())
-            .map(|j| (0..self.nrows()).map(|i| self[(i, j)].abs()).sum())
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            (0..self.nrows()).map(|i| self[(i, j)].abs()).sum()
+        })
     }
 
     fn col_l2(&self) -> Vec<F> {
-        (0..self.ncols())
-            .map(|j| {
-                (0..self.nrows())
-                    .map(|i| self[(i, j)] * self[(i, j)])
-                    .sum::<F>()
-                    .sqrt()
-            })
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            (0..self.nrows())
+                .map(|i| self[(i, j)] * self[(i, j)])
+                .sum::<F>()
+                .sqrt()
+        })
     }
 
     fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
@@ -211,17 +207,15 @@ where
             self.ncols(),
             "col_l2_centered: length mismatch"
         );
-        (0..self.ncols())
-            .map(|j| {
-                (0..self.nrows())
-                    .map(|i| {
-                        let value = self[(i, j)] - centers[j];
-                        value * value
-                    })
-                    .sum::<F>()
-                    .sqrt()
-            })
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            (0..self.nrows())
+                .map(|i| {
+                    let value = self[(i, j)] - centers[j];
+                    value * value
+                })
+                .sum::<F>()
+                .sqrt()
+        })
     }
 
     fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
@@ -230,13 +224,11 @@ where
             self.ncols(),
             "col_l1_centered: length mismatch"
         );
-        (0..self.ncols())
-            .map(|j| {
-                (0..self.nrows())
-                    .map(|i| (self[(i, j)] - centers[j]).abs())
-                    .sum()
-            })
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            (0..self.nrows())
+                .map(|i| (self[(i, j)] - centers[j]).abs())
+                .sum()
+        })
     }
 
     fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
@@ -245,8 +237,8 @@ where
             self.ncols(),
             "col_maxabs_centered: length mismatch"
         );
-        (0..self.ncols())
-            .map(|j| max_or_nan((0..self.nrows()).map(|i| (self[(i, j)] - centers[j]).abs())))
-            .collect()
+        collect_columns(self.ncols(), |j| {
+            max_or_nan((0..self.nrows()).map(|i| (self[(i, j)] - centers[j]).abs()))
+        })
     }
 }

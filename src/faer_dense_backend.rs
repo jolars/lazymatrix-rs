@@ -3,8 +3,8 @@
 use faer::{Col, ColMut, ColRef, Mat, MatRef};
 
 use crate::traits::{
-    ColumnStats, MatTransposeVec, MatVec, MatrixShape, RawColumn, RawColumns, Scalar, VectorView,
-    VectorViewMut, max_or_nan, min_or_nan, range_or_nan,
+    ColumnStats, MatTransposeVec, MatVec, MatrixShape, MaybeSend, MaybeSync, RawColumn, RawColumns,
+    Scalar, VectorView, VectorViewMut, collect_columns, max_or_nan, min_or_nan, range_or_nan,
 };
 
 impl<F: Scalar> VectorView<F> for Col<F> {
@@ -165,33 +165,46 @@ macro_rules! impl_dense_ops {
 impl_dense_ops!(Mat<F>);
 impl_dense_ops!(MatRef<'_, F>);
 
-fn means<F: Scalar>(nrows: usize, ncols: usize, at: impl Fn(usize, usize) -> F) -> Vec<F> {
+fn means<F>(
+    nrows: usize,
+    ncols: usize,
+    at: impl Fn(usize, usize) -> F + MaybeSend + MaybeSync,
+) -> Vec<F>
+where
+    F: Scalar + MaybeSend + MaybeSync,
+{
     let n = F::from_usize(nrows).unwrap();
-    (0..ncols)
-        .map(|j| (0..nrows).map(|i| at(i, j)).sum::<F>() / n)
-        .collect()
+    collect_columns(ncols, |j| (0..nrows).map(|i| at(i, j)).sum::<F>() / n)
 }
 
-fn sds<F: Scalar>(nrows: usize, ncols: usize, at: impl Fn(usize, usize) -> F) -> Vec<F> {
+fn sds<F>(
+    nrows: usize,
+    ncols: usize,
+    at: impl Fn(usize, usize) -> F + MaybeSend + MaybeSync,
+) -> Vec<F>
+where
+    F: Scalar + MaybeSend + MaybeSync,
+{
     let centers = means(nrows, ncols, &at);
     let n = F::from_usize(nrows).unwrap();
-    (0..ncols)
-        .map(|j| {
-            ((0..nrows)
-                .map(|i| {
-                    let deviation = at(i, j) - centers[j];
-                    deviation * deviation
-                })
-                .sum::<F>()
-                / n)
-                .sqrt()
-        })
-        .collect()
+    collect_columns(ncols, |j| {
+        ((0..nrows)
+            .map(|i| {
+                let deviation = at(i, j) - centers[j];
+                deviation * deviation
+            })
+            .sum::<F>()
+            / n)
+            .sqrt()
+    })
 }
 
 macro_rules! impl_dense_stats {
     ($matrix:ty) => {
-        impl<F: Scalar> ColumnStats<F> for $matrix {
+        impl<F> ColumnStats<F> for $matrix
+        where
+            F: Scalar + MaybeSend + MaybeSync,
+        {
             fn col_means(&self) -> Vec<F> {
                 means(self.nrows(), self.ncols(), |i, j| self[(i, j)])
             }
@@ -201,38 +214,36 @@ macro_rules! impl_dense_stats {
             }
 
             fn col_mins(&self) -> Vec<F> {
-                (0..self.ncols())
-                    .map(|j| min_or_nan((0..self.nrows()).map(|i| self[(i, j)])))
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    min_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
+                })
             }
 
             fn col_ranges(&self) -> Vec<F> {
-                (0..self.ncols())
-                    .map(|j| range_or_nan((0..self.nrows()).map(|i| self[(i, j)])))
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    range_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
+                })
             }
 
             fn col_maxabs(&self) -> Vec<F> {
-                (0..self.ncols())
-                    .map(|j| max_or_nan((0..self.nrows()).map(|i| self[(i, j)].abs())))
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    max_or_nan((0..self.nrows()).map(|i| self[(i, j)].abs()))
+                })
             }
 
             fn col_l1(&self) -> Vec<F> {
-                (0..self.ncols())
-                    .map(|j| (0..self.nrows()).map(|i| self[(i, j)].abs()).sum())
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    (0..self.nrows()).map(|i| self[(i, j)].abs()).sum()
+                })
             }
 
             fn col_l2(&self) -> Vec<F> {
-                (0..self.ncols())
-                    .map(|j| {
-                        (0..self.nrows())
-                            .map(|i| self[(i, j)] * self[(i, j)])
-                            .sum::<F>()
-                            .sqrt()
-                    })
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    (0..self.nrows())
+                        .map(|i| self[(i, j)] * self[(i, j)])
+                        .sum::<F>()
+                        .sqrt()
+                })
             }
 
             fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
@@ -241,17 +252,15 @@ macro_rules! impl_dense_stats {
                     self.ncols(),
                     "col_l2_centered: length mismatch"
                 );
-                (0..self.ncols())
-                    .map(|j| {
-                        (0..self.nrows())
-                            .map(|i| {
-                                let value = self[(i, j)] - centers[j];
-                                value * value
-                            })
-                            .sum::<F>()
-                            .sqrt()
-                    })
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    (0..self.nrows())
+                        .map(|i| {
+                            let value = self[(i, j)] - centers[j];
+                            value * value
+                        })
+                        .sum::<F>()
+                        .sqrt()
+                })
             }
 
             fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
@@ -260,13 +269,11 @@ macro_rules! impl_dense_stats {
                     self.ncols(),
                     "col_l1_centered: length mismatch"
                 );
-                (0..self.ncols())
-                    .map(|j| {
-                        (0..self.nrows())
-                            .map(|i| (self[(i, j)] - centers[j]).abs())
-                            .sum()
-                    })
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    (0..self.nrows())
+                        .map(|i| (self[(i, j)] - centers[j]).abs())
+                        .sum()
+                })
             }
 
             fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
@@ -275,11 +282,9 @@ macro_rules! impl_dense_stats {
                     self.ncols(),
                     "col_maxabs_centered: length mismatch"
                 );
-                (0..self.ncols())
-                    .map(|j| {
-                        max_or_nan((0..self.nrows()).map(|i| (self[(i, j)] - centers[j]).abs()))
-                    })
-                    .collect()
+                collect_columns(self.ncols(), |j| {
+                    max_or_nan((0..self.nrows()).map(|i| (self[(i, j)] - centers[j]).abs()))
+                })
             }
         }
     };
