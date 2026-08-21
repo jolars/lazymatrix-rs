@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      # Backend versions track Basin's compatibility surface.
+      - dependency-name: "faer"
+      - dependency-name: "faer-traits"
+      - dependency-name: "nalgebra"
+      - dependency-name: "nalgebra-sparse"
