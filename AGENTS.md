@@ -110,7 +110,8 @@ update carries an O(n) broadcast term (`r[i] += Δcⱼ/sⱼ` for all i). Keeping
 O(nnz) uses the glmnet/sklearn *offset trick*: represent the residual as
 `(stored vector + scalar offset)` so the broadcast is O(1). That choice shapes
 the column-access API: the borrowed column view exposes raw `(row, value)`
-entries plus `cⱼ`/`sⱼ`, while the solver derives `‖X̃ⱼ‖²` and manages the offset.
+entries plus `cⱼ`/`sⱼ`, provides ordinary logical-column operations, and lets
+the solver use the low-level representation when managing a residual offset.
 
 ## Column/row access — orientation as a capability
 
@@ -142,6 +143,15 @@ additive — new backend types (faer `SparseRowMat`, nalgebra `CsrMatrix`)
 implementing the agnostic three plus `SparseRows`; no churn to the CSC code. Name
 the column trait column-specifically now (not a layout-neutral "sparse access")
 so `SparseRows` is the obvious parallel later.
+
+Borrowing describes the views' representation, not the limit of their API.
+`LazyColumn` should provide correct operations on the logical normalized column,
+such as `dot(&[F])` and column norms, so callers do not have to rederive the
+normalization formulas. Keep the raw slices and normalization parameters
+available for specialized algorithms. Document complexity explicitly: a
+centered `dot(&[F])` needs the dense vector sum and is O(n + nnz), while an
+additive optimized path may accept a cached sum to remain O(nnz). These matrix
+operations belong on the view; solver state and update policies do not.
 
 ## Scope (v1)
 
