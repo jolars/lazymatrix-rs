@@ -11,10 +11,11 @@ use faer::sparse::SparseColMat;
 use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::{Accum, Col, Par};
 
+use crate::SparseColumnRef;
 use crate::traits::{
     ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec, MatrixShape,
-    Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign,
-    SumEntries, max_or_nan, sparse_column_sd,
+    RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns,
+    SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on Col<F> (scalar arithmetic only: bound F: Scalar) -------
@@ -121,6 +122,18 @@ impl<F: Scalar> SparseColumns<F> for SparseColMat<usize, F> {
         let start = self.col_ptr()[j];
         let end = self.col_ptr()[j + 1];
         (&self.row_idx()[start..end], &self.val()[start..end])
+    }
+}
+
+impl<F: Scalar> RawColumns<F> for SparseColMat<usize, F> {
+    type Column<'a>
+        = SparseColumnRef<'a, F>
+    where
+        Self: 'a;
+
+    fn raw_column(&self, j: usize) -> Self::Column<'_> {
+        let (rows, values) = self.sparse_column(j);
+        SparseColumnRef::new(rows, values, self.nrows())
     }
 }
 

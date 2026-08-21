@@ -12,7 +12,7 @@
 use faer::Col;
 use faer::sparse::{SparseColMat, Triplet};
 use lazymatrix::{
-    Centering, LazyColumn, LazyMatrix, MatVec, Normalization, Scaling, SparseColumns,
+    Centering, LazyMatrix, LazySparseColumn, MatVec, Normalization, Scaling, SparseColumns,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -39,22 +39,21 @@ impl OffsetResidual {
         }
     }
 
-    fn column_dot(&self, column: LazyColumn<'_, f64>, column_sum: f64) -> f64 {
+    fn column_dot(&self, column: LazySparseColumn<'_, f64>, column_sum: f64) -> f64 {
         column.dot_with_sum(&self.base, self.base_sum) + self.offset * column_sum
     }
 
     fn subtract_column(
         &mut self,
-        column: LazyColumn<'_, f64>,
+        column: LazySparseColumn<'_, f64>,
         raw_sum: f64,
         coefficient_change: f64,
     ) {
-        let scaled_change = coefficient_change / column.scale();
-        for (&row, &value) in column.row_indices().iter().zip(column.values()) {
-            self.base[row] -= scaled_change * value;
+        for (row, correction) in column.stored_corrections() {
+            self.base[row] -= coefficient_change * correction;
         }
-        self.base_sum -= scaled_change * raw_sum;
-        self.offset += scaled_change * column.center();
+        self.base_sum -= coefficient_change * raw_sum / column.scale();
+        self.offset -= coefficient_change * column.implicit_value();
     }
 
     fn norm_squared(&self) -> f64 {
@@ -75,8 +74,8 @@ struct CoordinateDescentResult {
     kkt_violation: f64,
 }
 
-fn summarize_column(column: LazyColumn<'_, f64>) -> ColumnSummary {
-    let raw_sum = column.values().iter().sum();
+fn summarize_column(column: LazySparseColumn<'_, f64>) -> ColumnSummary {
+    let raw_sum = column.raw_sum();
 
     ColumnSummary {
         raw_sum,
@@ -107,7 +106,7 @@ where
 {
     (0..matrix.ncols())
         .map(|j| {
-            let correlation = residual.column_dot(matrix.column(j), summaries[j].sum);
+            let correlation = residual.column_dot(matrix.sparse_column(j), summaries[j].sum);
             if beta[j] > 0.0 {
                 (correlation - lambda).abs()
             } else if beta[j] < 0.0 {
@@ -131,7 +130,7 @@ where
 {
     assert_eq!(matrix.nrows(), y.len(), "response length must equal nrows");
     let summaries: Vec<_> = (0..matrix.ncols())
-        .map(|j| summarize_column(matrix.column(j)))
+        .map(|j| summarize_column(matrix.sparse_column(j)))
         .collect();
     let mut beta = vec![0.0; matrix.ncols()];
     let mut residual = OffsetResidual::new(y);
@@ -139,7 +138,7 @@ where
     for sweep in 1..=max_sweeps {
         for j in 0..matrix.ncols() {
             let summary = summaries[j];
-            let correlation = residual.column_dot(matrix.column(j), summary.sum);
+            let correlation = residual.column_dot(matrix.sparse_column(j), summary.sum);
             let partial_correlation = correlation + summary.norm_squared * beta[j];
             let updated = if summary.norm_squared == 0.0 {
                 0.0
@@ -148,7 +147,7 @@ where
             };
             let change = updated - beta[j];
             if change != 0.0 {
-                residual.subtract_column(matrix.column(j), summary.raw_sum, change);
+                residual.subtract_column(matrix.sparse_column(j), summary.raw_sum, change);
                 beta[j] = updated;
             }
         }
@@ -205,7 +204,7 @@ fn main() {
     let initial_residual = OffsetResidual::new(&y);
     let lambda_max = (0..ncols)
         .map(|j| {
-            let column = matrix.column(j);
+            let column = matrix.sparse_column(j);
             initial_residual.column_dot(column, column.sum()).abs()
         })
         .fold(0.0, f64::max);

@@ -26,8 +26,10 @@
 //! no linear-algebra dependency by itself. Concrete implementations are provided
 //! behind feature flags:
 //!
-//! * `faer` — [`faer::sparse::SparseColMat`] over [`faer::Col`].
-//! * `nalgebra` — [`nalgebra_sparse::CscMatrix`] over [`nalgebra::DVector`].
+//! * `faer` — [`faer::Mat`] and [`faer::sparse::SparseColMat`] over
+//!   [`faer::Col`].
+//! * `nalgebra` — [`nalgebra::DMatrix`] and [`nalgebra_sparse::CscMatrix`] over
+//!   [`nalgebra::DVector`].
 //!
 //! Any type implementing the [`traits`] surface (a dense matrix, say) works too.
 //!
@@ -46,9 +48,10 @@
 pub mod traits;
 
 pub use traits::{
-    Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec,
-    MatrixShape, Normalization, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, Scaling,
-    SparseColumns, SubScalarAssign, SumEntries,
+    Centering, ColumnStats, Columns, DotProduct, DotSlice, ElemDivAssign, L2Norm, LogicalColumn,
+    MatTransposeVec, MatVec, MatrixShape, Normalization, RawColumn, RawColumns, Scalar,
+    ScaleAssign, ScaledAddAssign, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign,
+    SumEntries, VectorView, VectorViewMut,
 };
 
 #[cfg(feature = "faer")]
@@ -57,10 +60,16 @@ mod faer_sparse_backend;
 #[cfg(feature = "nalgebra")]
 mod nalgebra_sparse_backend;
 
-/// A borrowed view of one lazily normalized sparse column.
+#[cfg(feature = "faer")]
+mod faer_dense_backend;
+
+#[cfg(feature = "nalgebra")]
+mod nalgebra_dense_backend;
+
+/// A borrowed raw sparse column.
 ///
 /// The view exposes the underlying matrix's stored row indices and raw values
-/// without copying. Its logical entries are
+/// without copying. A normalized [`LazyColumn`] wrapping it has logical entries
 ///
 /// ```text
 /// stored row:   (value − center) / scale
@@ -70,33 +79,104 @@ mod nalgebra_sparse_backend;
 /// Thus, a centered logical column is generally dense even though the two
 /// borrowed slices contain only the underlying matrix's stored entries.
 #[derive(Clone, Copy, Debug)]
-pub struct LazyColumn<'a, F> {
+pub struct SparseColumnRef<'a, F> {
     row_indices: &'a [usize],
     values: &'a [F],
     len: usize,
-    center: F,
-    scale: F,
 }
 
-impl<'a, F: Scalar> LazyColumn<'a, F> {
+impl<'a, F> SparseColumnRef<'a, F> {
+    fn new(row_indices: &'a [usize], values: &'a [F], len: usize) -> Self {
+        Self {
+            row_indices,
+            values,
+            len,
+        }
+    }
+
     /// Row indices of the raw stored entries.
     pub fn row_indices(&self) -> &'a [usize] {
         self.row_indices
     }
 
-    /// Raw stored values from the underlying matrix.
+    /// Raw stored values corresponding to [`Self::row_indices`].
     pub fn values(&self) -> &'a [F] {
         self.values
     }
+}
 
+impl<F: Scalar> RawColumn<F> for SparseColumnRef<'_, F> {
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn stored_len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn for_each_stored(&self, mut f: impl FnMut(usize, F)) {
+        for (&row, &value) in self.row_indices.iter().zip(self.values) {
+            f(row, value);
+        }
+    }
+}
+
+/// A borrowed lazily normalized column over an arbitrary raw backend view.
+#[derive(Clone, Copy, Debug)]
+pub struct LazyColumn<C, F> {
+    raw: C,
+    center: F,
+    scale: F,
+}
+
+impl<C, F> LazyColumn<C, F> {
+    /// Borrow the backend's raw column view.
+    pub fn raw(&self) -> &C {
+        &self.raw
+    }
+}
+
+pub type LazySparseColumn<'a, F> = LazyColumn<SparseColumnRef<'a, F>, F>;
+
+impl<'a, F: Scalar> LazySparseColumn<'a, F> {
+    /// Row indices of the raw stored entries.
+    pub fn row_indices(&self) -> &'a [usize] {
+        self.raw.row_indices()
+    }
+
+    /// Raw stored values corresponding to [`Self::row_indices`].
+    pub fn values(&self) -> &'a [F] {
+        self.raw.values()
+    }
+
+    /// Logical value at a structurally absent row, `-center / scale`.
+    pub fn implicit_value(&self) -> F {
+        -self.center / self.scale
+    }
+
+    /// Sum of the raw stored values.
+    pub fn raw_sum(&self) -> F {
+        self.raw.raw_sum()
+    }
+
+    /// Stored corrections to the implicit value as `(row, raw_value / scale)`.
+    pub fn stored_corrections(&self) -> impl Iterator<Item = (usize, F)> + '_ {
+        self.row_indices()
+            .iter()
+            .copied()
+            .zip(self.values().iter().map(|&value| value / self.scale))
+    }
+}
+
+impl<C: RawColumn<F>, F: Scalar> LazyColumn<C, F> {
     /// Logical length of the column, including structurally absent entries.
     pub fn len(&self) -> usize {
-        self.len
+        self.raw.len()
     }
 
     /// Whether the logical column has no rows.
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.len() == 0
     }
 
     /// Effective column center.
@@ -117,9 +197,8 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     ///
     /// This takes O(nnz) time and does not materialize the column.
     pub fn sum(&self) -> F {
-        let raw_sum = self.values.iter().copied().sum::<F>();
-        let len = F::from_usize(self.len).unwrap();
-        (raw_sum - len * self.center) / self.scale
+        let len = F::from_usize(self.len()).unwrap();
+        (self.raw.raw_sum() - len * self.center) / self.scale
     }
 
     /// Squared Euclidean norm of the logical normalized column.
@@ -127,15 +206,12 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     /// Structurally absent entries contribute `center² / scale²`. This takes
     /// O(nnz) time and does not materialize the column.
     pub fn norm_squared(&self) -> F {
-        let stored_squared_deviations = self
-            .values
-            .iter()
-            .map(|&value| {
-                let deviation = value - self.center;
-                deviation * deviation
-            })
-            .sum::<F>();
-        let implicit_count = F::from_usize(self.len - self.values.len()).unwrap();
+        let mut stored_squared_deviations = F::zero();
+        self.raw.for_each_stored(|_, value| {
+            let deviation = value - self.center;
+            stored_squared_deviations = stored_squared_deviations + deviation * deviation;
+        });
+        let implicit_count = F::from_usize(self.len() - self.raw.stored_len()).unwrap();
         let centered_norm_squared =
             stored_squared_deviations + implicit_count * self.center * self.center;
         centered_norm_squared / (self.scale * self.scale)
@@ -150,13 +226,13 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     /// # Panics
     ///
     /// Panics if `vector.len() != self.len()`.
-    pub fn dot(&self, vector: &[F]) -> F {
+    pub fn dot<V: VectorView<F> + ?Sized>(&self, vector: &V) -> F {
         assert_eq!(
             vector.len(),
-            self.len,
+            self.len(),
             "vector length must equal column length"
         );
-        let vector_sum = vector.iter().copied().sum();
+        let vector_sum = vector.sum();
         self.dot_with_sum(vector, vector_sum)
     }
 
@@ -169,18 +245,15 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     /// # Panics
     ///
     /// Panics if `vector.len() != self.len()`.
-    pub fn dot_with_sum(&self, vector: &[F], vector_sum: F) -> F {
+    pub fn dot_with_sum<V: VectorView<F> + ?Sized>(&self, vector: &V, vector_sum: F) -> F {
         assert_eq!(
             vector.len(),
-            self.len,
+            self.len(),
             "vector length must equal column length"
         );
-        let raw_dot = self
-            .row_indices
-            .iter()
-            .zip(self.values)
-            .map(|(&row, &value)| value * vector[row])
-            .sum::<F>();
+        let mut raw_dot = F::zero();
+        self.raw
+            .for_each_stored(|row, value| raw_dot = raw_dot + value * vector.get(row));
         (raw_dot - self.center * vector_sum) / self.scale
     }
 
@@ -194,21 +267,23 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     /// # Panics
     ///
     /// Panics unless `vector.len() == weights.len() == self.len()`.
-    pub fn weighted_dot(&self, vector: &[F], weights: &[F]) -> F {
+    pub fn weighted_dot<V, W>(&self, vector: &V, weights: &W) -> F
+    where
+        V: VectorView<F> + ?Sized,
+        W: VectorView<F> + ?Sized,
+    {
         assert_eq!(
             vector.len(),
-            self.len,
+            self.len(),
             "vector length must equal column length"
         );
         assert_eq!(
             weights.len(),
-            self.len,
+            self.len(),
             "weights length must equal column length"
         );
-        let weighted_vector_sum = vector
-            .iter()
-            .zip(weights)
-            .map(|(&value, &weight)| value * weight)
+        let weighted_vector_sum = (0..self.len())
+            .map(|i| vector.get(i) * weights.get(i))
             .sum();
         self.weighted_dot_with_sum(vector, weights, weighted_vector_sum)
     }
@@ -223,23 +298,25 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     /// # Panics
     ///
     /// Panics unless `vector.len() == weights.len() == self.len()`.
-    pub fn weighted_dot_with_sum(&self, vector: &[F], weights: &[F], weighted_vector_sum: F) -> F {
+    pub fn weighted_dot_with_sum<V, W>(&self, vector: &V, weights: &W, weighted_vector_sum: F) -> F
+    where
+        V: VectorView<F> + ?Sized,
+        W: VectorView<F> + ?Sized,
+    {
         assert_eq!(
             vector.len(),
-            self.len,
+            self.len(),
             "vector length must equal column length"
         );
         assert_eq!(
             weights.len(),
-            self.len,
+            self.len(),
             "weights length must equal column length"
         );
-        let raw_weighted_dot = self
-            .row_indices
-            .iter()
-            .zip(self.values)
-            .map(|(&row, &value)| value * weights[row] * vector[row])
-            .sum::<F>();
+        let mut raw_weighted_dot = F::zero();
+        self.raw.for_each_stored(|row, value| {
+            raw_weighted_dot = raw_weighted_dot + value * weights.get(row) * vector.get(row);
+        });
         (raw_weighted_dot - self.center * weighted_vector_sum) / self.scale
     }
 
@@ -254,13 +331,13 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     /// # Panics
     ///
     /// Panics if `weights.len() != self.len()`.
-    pub fn weighted_norm_squared(&self, weights: &[F]) -> F {
+    pub fn weighted_norm_squared<W: VectorView<F> + ?Sized>(&self, weights: &W) -> F {
         assert_eq!(
             weights.len(),
-            self.len,
+            self.len(),
             "weights length must equal column length"
         );
-        self.weighted_norm_squared_with_sum(weights, weights.iter().copied().sum())
+        self.weighted_norm_squared_with_sum(weights, weights.sum())
     }
 
     /// Weighted squared norm using a precomputed sum of the weights.
@@ -272,27 +349,84 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     /// # Panics
     ///
     /// Panics if `weights.len() != self.len()`.
-    pub fn weighted_norm_squared_with_sum(&self, weights: &[F], weight_sum: F) -> F {
+    pub fn weighted_norm_squared_with_sum<W: VectorView<F> + ?Sized>(
+        &self,
+        weights: &W,
+        weight_sum: F,
+    ) -> F {
         assert_eq!(
             weights.len(),
-            self.len,
+            self.len(),
             "weights length must equal column length"
         );
-        let (stored_squared_deviations, stored_weight) =
-            self.row_indices.iter().zip(self.values).fold(
-                (F::zero(), F::zero()),
-                |(squares, total_weight), (&row, &value)| {
-                    let deviation = value - self.center;
-                    (
-                        squares + weights[row] * deviation * deviation,
-                        total_weight + weights[row],
-                    )
-                },
-            );
+        let mut stored_squared_deviations = F::zero();
+        let mut stored_weight = F::zero();
+        self.raw.for_each_stored(|row, value| {
+            let weight = weights.get(row);
+            let deviation = value - self.center;
+            stored_squared_deviations = stored_squared_deviations + weight * deviation * deviation;
+            stored_weight = stored_weight + weight;
+        });
         let implicit_weight = weight_sum - stored_weight;
         let centered_norm_squared =
             stored_squared_deviations + implicit_weight * self.center * self.center;
         centered_norm_squared / (self.scale * self.scale)
+    }
+
+    /// Add `alpha` times this logical column to a dense destination.
+    pub fn scaled_add_to<V: VectorViewMut<F> + ?Sized>(&self, alpha: F, destination: &mut V) {
+        self.raw.affine_add_to(
+            alpha / self.scale,
+            -alpha * self.center / self.scale,
+            destination,
+        );
+    }
+}
+
+impl<C: RawColumn<F>, F: Scalar> LogicalColumn<F> for LazyColumn<C, F> {
+    fn len(&self) -> usize {
+        self.len()
+    }
+    fn center(&self) -> F {
+        self.center()
+    }
+    fn scale(&self) -> F {
+        self.scale()
+    }
+    fn sum(&self) -> F {
+        self.sum()
+    }
+    fn norm_squared(&self) -> F {
+        self.norm_squared()
+    }
+    fn dot<V: VectorView<F> + ?Sized>(&self, vector: &V) -> F {
+        self.dot(vector)
+    }
+    fn dot_with_sum<V: VectorView<F> + ?Sized>(&self, vector: &V, vector_sum: F) -> F {
+        self.dot_with_sum(vector, vector_sum)
+    }
+    fn weighted_dot<V, W>(&self, vector: &V, weights: &W) -> F
+    where
+        V: VectorView<F> + ?Sized,
+        W: VectorView<F> + ?Sized,
+    {
+        self.weighted_dot(vector, weights)
+    }
+    fn weighted_dot_with_sum<V, W>(&self, vector: &V, weights: &W, sum: F) -> F
+    where
+        V: VectorView<F> + ?Sized,
+        W: VectorView<F> + ?Sized,
+    {
+        self.weighted_dot_with_sum(vector, weights, sum)
+    }
+    fn weighted_norm_squared<W: VectorView<F> + ?Sized>(&self, weights: &W) -> F {
+        self.weighted_norm_squared(weights)
+    }
+    fn weighted_norm_squared_with_sum<W: VectorView<F> + ?Sized>(&self, weights: &W, sum: F) -> F {
+        self.weighted_norm_squared_with_sum(weights, sum)
+    }
+    fn scaled_add_to<V: VectorViewMut<F> + ?Sized>(&self, alpha: F, destination: &mut V) {
+        self.scaled_add_to(alpha, destination);
     }
 }
 
@@ -376,25 +510,28 @@ where
         &self.data
     }
 
-    /// Borrow one lazily normalized sparse column without copying.
-    ///
-    /// The returned view contains raw stored entries plus the effective center
-    /// and scale needed to interpret both stored and implicit entries. It does
-    /// not materialize the generally dense centered column.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `j >= self.ncols()`.
-    pub fn column(&self, j: usize) -> LazyColumn<'_, F>
+    /// Borrow one lazily normalized column without copying.
+    pub fn column(&self, j: usize) -> LazyColumn<M::Column<'_>, F>
+    where
+        M: RawColumns<F>,
+    {
+        assert!(j < self.ncols(), "column index out of bounds");
+        LazyColumn {
+            raw: self.data.raw_column(j),
+            center: self.centers.as_ref().map_or_else(F::zero, |c| c[j]),
+            scale: self.scales.as_ref().map_or_else(F::one, |s| s[j]),
+        }
+    }
+
+    /// Borrow one lazily normalized CSC column with its sparse representation.
+    pub fn sparse_column(&self, j: usize) -> LazySparseColumn<'_, F>
     where
         M: SparseColumns<F>,
     {
         assert!(j < self.ncols(), "column index out of bounds");
         let (row_indices, values) = self.data.sparse_column(j);
         LazyColumn {
-            row_indices,
-            values,
-            len: self.nrows(),
+            raw: SparseColumnRef::new(row_indices, values, self.nrows()),
             center: self.centers.as_ref().map_or_else(F::zero, |c| c[j]),
             scale: self.scales.as_ref().map_or_else(F::one, |s| s[j]),
         }
@@ -455,6 +592,21 @@ where
 
     fn ncols(&self) -> usize {
         self.data.ncols()
+    }
+}
+
+impl<M, F> Columns<F> for LazyMatrix<M, F>
+where
+    F: Scalar,
+    M: RawColumns<F>,
+{
+    type Column<'a>
+        = LazyColumn<M::Column<'a>, F>
+    where
+        Self: 'a;
+
+    fn column(&self, j: usize) -> Self::Column<'_> {
+        LazyMatrix::column(self, j)
     }
 }
 

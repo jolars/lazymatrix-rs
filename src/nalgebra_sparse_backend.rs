@@ -12,10 +12,11 @@ use nalgebra_sparse::CscMatrix;
 use nalgebra_sparse::ops::Op;
 use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
+use crate::SparseColumnRef;
 use crate::traits::{
     ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec, MatrixShape,
-    Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign,
-    SumEntries, max_or_nan, sparse_column_sd,
+    RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns,
+    SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on DVector<F> ---------------------------------------------
@@ -117,6 +118,18 @@ impl<F: Scalar> SparseColumns<F> for CscMatrix<F> {
         let start = col_offsets[j];
         let end = col_offsets[j + 1];
         (&row_indices[start..end], &values[start..end])
+    }
+}
+
+impl<F: Scalar> RawColumns<F> for CscMatrix<F> {
+    type Column<'a>
+        = SparseColumnRef<'a, F>
+    where
+        Self: 'a;
+
+    fn raw_column(&self, j: usize) -> Self::Column<'_> {
+        let (rows, values) = self.sparse_column(j);
+        SparseColumnRef::new(rows, values, self.nrows())
     }
 }
 

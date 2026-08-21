@@ -38,6 +38,10 @@ required-features = ["faer"]
 name = "coordinate_descent"
 required-features = ["faer"]
 
+[[example]]
+name = "slope_primitives"
+required-features = ["faer"]
+
 [[bench]]
 name = "column_sds"
 harness = false

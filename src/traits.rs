@@ -16,8 +16,12 @@
 //!   exactly the shape the centering/scaling math needs.
 //! * [`ColumnStats`] — column statistics computed directly over a (possibly
 //!   sparse) backend matrix, used by the `normalized` constructor.
-//! * [`SparseColumns`] — borrowed access to contiguous sparse columns,
-//!   implemented only by backends whose storage orientation supports it.
+//! * [`VectorView`] / [`VectorViewMut`] — storage-independent borrowed vector
+//!   access, including strided backend views.
+//! * [`RawColumn`] / [`RawColumns`] and [`LogicalColumn`] / [`Columns`] — the
+//!   backend and normalized sides of storage-independent column access.
+//! * [`SparseColumns`] — the stronger borrowed access capability for
+//!   contiguous sparse columns.
 
 /// Numeric scalar element type.
 ///
@@ -76,6 +80,168 @@ pub trait MatrixShape {
     fn ncols(&self) -> usize;
 }
 
+/// Read-only indexed access to a dense logical vector.
+///
+/// Implementations may be contiguous or strided. Indexing must take O(1)
+/// time; algorithms must not assume that the entries form a slice.
+pub trait VectorView<F: Scalar> {
+    fn len(&self) -> usize;
+    fn get(&self, index: usize) -> F;
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn sum(&self) -> F {
+        (0..self.len()).map(|i| self.get(i)).sum()
+    }
+}
+
+/// Mutable indexed access to a dense logical vector.
+pub trait VectorViewMut<F: Scalar>: VectorView<F> {
+    fn set(&mut self, index: usize, value: F);
+}
+
+impl<F: Scalar> VectorView<F> for [F] {
+    fn len(&self) -> usize {
+        <[F]>::len(self)
+    }
+
+    fn get(&self, index: usize) -> F {
+        self[index]
+    }
+}
+
+impl<F: Scalar> VectorViewMut<F> for [F] {
+    fn set(&mut self, index: usize, value: F) {
+        self[index] = value;
+    }
+}
+
+impl<F: Scalar> VectorView<F> for Vec<F> {
+    fn len(&self) -> usize {
+        Vec::len(self)
+    }
+
+    fn get(&self, index: usize) -> F {
+        self[index]
+    }
+}
+
+impl<F: Scalar> VectorViewMut<F> for Vec<F> {
+    fn set(&mut self, index: usize, value: F) {
+        self[index] = value;
+    }
+}
+
+impl<F: Scalar, const N: usize> VectorView<F> for [F; N] {
+    fn len(&self) -> usize {
+        N
+    }
+
+    fn get(&self, index: usize) -> F {
+        self[index]
+    }
+}
+
+impl<F: Scalar, const N: usize> VectorViewMut<F> for [F; N] {
+    fn set(&mut self, index: usize, value: F) {
+        self[index] = value;
+    }
+}
+
+/// A borrowed raw column supplied by a matrix backend.
+///
+/// `for_each_stored` visits every stored entry, including explicitly stored
+/// zeros. Dense implementations visit every row. Sparse implementations omit
+/// structural zeros.
+pub trait RawColumn<F: Scalar> {
+    fn len(&self) -> usize;
+    fn stored_len(&self) -> usize;
+    fn for_each_stored(&self, f: impl FnMut(usize, F));
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    fn raw_sum(&self) -> F {
+        let mut sum = F::zero();
+        self.for_each_stored(|_, value| sum = sum + value);
+        sum
+    }
+
+    /// Add `raw_multiplier * raw_column + offset` to a dense destination.
+    ///
+    /// Sparse implementations take O(nnz) when `offset == 0`, and O(n + nnz)
+    /// otherwise. Dense implementations take O(n).
+    fn affine_add_to<V>(&self, raw_multiplier: F, offset: F, destination: &mut V)
+    where
+        V: VectorViewMut<F> + ?Sized,
+    {
+        assert_eq!(
+            destination.len(),
+            self.len(),
+            "destination length must equal column length"
+        );
+        if offset != F::zero() {
+            for row in 0..destination.len() {
+                destination.set(row, destination.get(row) + offset);
+            }
+        }
+        self.for_each_stored(|row, value| {
+            destination.set(row, destination.get(row) + raw_multiplier * value);
+        });
+    }
+}
+
+/// Borrowed raw-column access for a backend matrix.
+pub trait RawColumns<F: Scalar>: MatrixShape {
+    type Column<'a>: RawColumn<F>
+    where
+        Self: 'a;
+
+    fn raw_column(&self, j: usize) -> Self::Column<'_>;
+}
+
+/// Operations on one logical, possibly normalized column.
+pub trait LogicalColumn<F: Scalar> {
+    fn len(&self) -> usize;
+    fn center(&self) -> F;
+    fn scale(&self) -> F;
+    fn sum(&self) -> F;
+    fn norm_squared(&self) -> F;
+    fn dot<V: VectorView<F> + ?Sized>(&self, vector: &V) -> F;
+    fn dot_with_sum<V: VectorView<F> + ?Sized>(&self, vector: &V, vector_sum: F) -> F;
+    fn weighted_dot<V, W>(&self, vector: &V, weights: &W) -> F
+    where
+        V: VectorView<F> + ?Sized,
+        W: VectorView<F> + ?Sized;
+    fn weighted_dot_with_sum<V, W>(&self, vector: &V, weights: &W, weighted_vector_sum: F) -> F
+    where
+        V: VectorView<F> + ?Sized,
+        W: VectorView<F> + ?Sized;
+    fn weighted_norm_squared<W: VectorView<F> + ?Sized>(&self, weights: &W) -> F;
+    fn weighted_norm_squared_with_sum<W: VectorView<F> + ?Sized>(
+        &self,
+        weights: &W,
+        weight_sum: F,
+    ) -> F;
+    fn scaled_add_to<V: VectorViewMut<F> + ?Sized>(&self, alpha: F, destination: &mut V);
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// Borrowed logical-column access for a matrix or matrix-like operator.
+pub trait Columns<F: Scalar>: MatrixShape {
+    type Column<'a>: LogicalColumn<F>
+    where
+        Self: 'a;
+
+    fn column(&self, j: usize) -> Self::Column<'_>;
+}
+
 /// Matrix–vector product `A x`, returning a freshly allocated vector of length
 /// `nrows`.
 pub trait MatVec<V>: MatrixShape {
@@ -131,6 +297,59 @@ pub trait SparseColumns<F: Scalar>: MatrixShape {
     ///
     /// Panics if `j >= self.ncols()`.
     fn sparse_column(&self, j: usize) -> (&[usize], &[F]);
+}
+
+impl<M: MatrixShape + ?Sized> MatrixShape for &M {
+    fn nrows(&self) -> usize {
+        (**self).nrows()
+    }
+
+    fn ncols(&self) -> usize {
+        (**self).ncols()
+    }
+}
+
+impl<M, V> MatVec<V> for &M
+where
+    M: MatVec<V> + ?Sized,
+{
+    fn matvec(&self, x: &V) -> V {
+        (**self).matvec(x)
+    }
+}
+
+impl<M, V> MatTransposeVec<V> for &M
+where
+    M: MatTransposeVec<V> + ?Sized,
+{
+    fn mat_transpose_vec(&self, x: &V) -> V {
+        (**self).mat_transpose_vec(x)
+    }
+}
+
+impl<M, F> RawColumns<F> for &M
+where
+    M: RawColumns<F> + ?Sized,
+    F: Scalar,
+{
+    type Column<'a>
+        = M::Column<'a>
+    where
+        Self: 'a;
+
+    fn raw_column(&self, j: usize) -> Self::Column<'_> {
+        (**self).raw_column(j)
+    }
+}
+
+impl<M, F> SparseColumns<F> for &M
+where
+    M: SparseColumns<F> + ?Sized,
+    F: Scalar,
+{
+    fn sparse_column(&self, j: usize) -> (&[usize], &[F]) {
+        (**self).sparse_column(j)
+    }
 }
 
 /// In-place elementwise division by a coefficient slice: `self[i] /= coeffs[i]`.
@@ -213,6 +432,36 @@ pub trait ColumnStats<F: Scalar> {
     /// The implicit zero entries contribute `|c_j|`, folded in alongside the
     /// stored-entry maxima. `centers` must have length `ncols`.
     fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F>;
+}
+
+impl<M, F> ColumnStats<F> for &M
+where
+    M: ColumnStats<F> + ?Sized,
+    F: Scalar,
+{
+    fn col_means(&self) -> Vec<F> {
+        (**self).col_means()
+    }
+
+    fn col_sds(&self) -> Vec<F> {
+        (**self).col_sds()
+    }
+
+    fn col_maxabs(&self) -> Vec<F> {
+        (**self).col_maxabs()
+    }
+
+    fn col_l2(&self) -> Vec<F> {
+        (**self).col_l2()
+    }
+
+    fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+        (**self).col_l2_centered(centers)
+    }
+
+    fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+        (**self).col_maxabs_centered(centers)
+    }
 }
 
 /// How to center each column.

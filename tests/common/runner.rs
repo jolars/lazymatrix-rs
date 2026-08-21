@@ -4,13 +4,15 @@
 //! matrix–vector products; every backend's lazy operator is checked against it.
 #![allow(dead_code)]
 
+use lazymatrix::VectorView;
 use lazymatrix::{
-    Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, LazyColumn, LazyMatrix,
-    MatTransposeVec, MatVec, MatrixShape, Normalization, ScaleAssign, ScaledAddAssign,
-    ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign, SumEntries,
+    Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, LazyMatrix,
+    LazySparseColumn, MatTransposeVec, MatVec, MatrixShape, Normalization, RawColumns, ScaleAssign,
+    ScaledAddAssign, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign, SumEntries,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
+use std::cell::Cell;
 
 /// A randomly-generated sparse matrix in both dense and triplet form.
 pub struct TestMatrix {
@@ -183,6 +185,178 @@ where
     lazy_column_operations_match_dense_oracle(&build);
     lazy_column_operations_handle_nonfinite_values(&build);
     empty_and_out_of_bounds_columns(&build);
+    cached_sparse_products_touch_only_stored_rows(&build);
+}
+
+struct CountingView<'a> {
+    values: &'a [f64],
+    reads: Cell<usize>,
+}
+
+impl VectorView<f64> for CountingView<'_> {
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn get(&self, index: usize) -> f64 {
+        self.reads.set(self.reads.get() + 1);
+        self.values[index]
+    }
+}
+
+fn cached_sparse_products_touch_only_stored_rows<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: SparseColumns<f64>,
+{
+    let tm = column_view_matrix();
+    let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), Some(vec![0.5; 4]), None);
+    let column = lazy.sparse_column(0);
+    let vector = CountingView {
+        values: &[1.0, 2.0, 3.0, 4.0],
+        reads: Cell::new(0),
+    };
+    column.dot_with_sum(&vector, 10.0);
+    assert_eq!(vector.reads.get(), column.values().len());
+
+    let weights = CountingView {
+        values: &[0.5, 1.0, 1.5, 2.0],
+        reads: Cell::new(0),
+    };
+    vector.reads.set(0);
+    column.weighted_dot_with_sum(&vector, &weights, 15.0);
+    assert_eq!(vector.reads.get(), column.values().len());
+    assert_eq!(weights.reads.get(), column.values().len());
+}
+
+/// Run logical-column checks shared by dense and sparse storage backends.
+pub fn run_logical_columns_suite<M>(build: impl Fn(&TestMatrix) -> M)
+where
+    M: RawColumns<f64> + ColumnStats<f64>,
+{
+    let tm = column_view_matrix();
+    let centers = vec![0.5, -1.0, 2.0, 3.0];
+    let scales = vec![2.0, 4.0, 0.5, 1.5];
+    let vector = vec![1.5, -2.0, 0.25, 3.0];
+    let weights = vec![0.5, 2.0, 1.25, 3.0];
+
+    for &use_center in &[false, true] {
+        for &use_scale in &[false, true] {
+            let active_centers = use_center.then(|| centers.clone());
+            let active_scales = use_scale.then(|| scales.clone());
+            let lazy =
+                LazyMatrix::from_parts(build(&tm), active_centers.clone(), active_scales.clone());
+            let dense = materialize(
+                &tm.dense,
+                active_centers.as_deref(),
+                active_scales.as_deref(),
+            );
+
+            for j in 0..tm.ncols {
+                let column = lazy.column(j);
+                let expected: Vec<f64> = dense.iter().map(|row| row[j]).collect();
+                let expected_dot = dot(&expected, &vector);
+                let expected_weighted_dot = expected
+                    .iter()
+                    .zip(&vector)
+                    .zip(&weights)
+                    .map(|((&x, &v), &w)| x * v * w)
+                    .sum::<f64>();
+                let expected_weighted_norm = expected
+                    .iter()
+                    .zip(&weights)
+                    .map(|(&x, &w)| w * x * x)
+                    .sum::<f64>();
+
+                approx::assert_abs_diff_eq!(column.sum(), expected.iter().sum(), epsilon = EPS);
+                approx::assert_abs_diff_eq!(
+                    column.norm_squared(),
+                    expected.iter().map(|x| x * x).sum::<f64>(),
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(column.dot(&vector), expected_dot, epsilon = EPS);
+                approx::assert_abs_diff_eq!(
+                    column.dot_with_sum(&vector, vector.iter().sum()),
+                    expected_dot,
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(
+                    column.weighted_dot(&vector, &weights),
+                    expected_weighted_dot,
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(
+                    column.weighted_dot_with_sum(
+                        &vector,
+                        &weights,
+                        vector.iter().zip(&weights).map(|(v, w)| v * w).sum(),
+                    ),
+                    expected_weighted_dot,
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(
+                    column.weighted_norm_squared(&weights),
+                    expected_weighted_norm,
+                    epsilon = EPS
+                );
+
+                let mut destination = vec![1.0; tm.nrows];
+                column.scaled_add_to(-0.75, &mut destination);
+                let expected_destination: Vec<_> =
+                    expected.iter().map(|&x| 1.0 - 0.75 * x).collect();
+                assert_close(&destination, &expected_destination, EPS);
+            }
+        }
+    }
+
+    let matrix = build(&tm);
+    let borrowed = LazyMatrix::new(&matrix, Normalization::new(Centering::Mean, Scaling::Sd));
+    assert_eq!(borrowed.nrows(), tm.nrows);
+    assert_eq!(borrowed.ncols(), tm.ncols);
+    assert_eq!(borrowed.column(0).len(), tm.nrows);
+
+    let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), None, None);
+    let short = vec![1.0; tm.nrows - 1];
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            lazy.column(0).dot(&short)
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut destination = short.clone();
+            lazy.column(0).scaled_add_to(1.0, &mut destination);
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lazy.column(tm.ncols))).is_err()
+    );
+
+    let empty = TestMatrix {
+        nrows: 0,
+        ncols: 2,
+        dense: Vec::new(),
+        triplets: Vec::new(),
+    };
+    let empty = LazyMatrix::<_, f64>::from_parts(build(&empty), None, None);
+    let column = empty.column(0);
+    assert!(column.is_empty());
+    assert_eq!(column.sum(), 0.0);
+    assert_eq!(column.norm_squared(), 0.0);
+    assert_eq!(column.dot(&[]), 0.0);
+
+    let nonfinite = TestMatrix {
+        nrows: 3,
+        ncols: 1,
+        dense: vec![vec![f64::NAN], vec![0.0], vec![f64::INFINITY]],
+        triplets: vec![(0, 0, f64::NAN), (2, 0, f64::INFINITY)],
+    };
+    let nonfinite = LazyMatrix::<_, f64>::from_parts(build(&nonfinite), None, None);
+    let column = nonfinite.column(0);
+    assert!(column.sum().is_nan());
+    assert!(column.dot(&[1.0, 2.0, 3.0]).is_nan());
+    assert!(column.weighted_norm_squared(&[0.5, 1.0, 1.5]).is_nan());
 }
 
 fn sparse_columns_expose_raw_storage<M>(build: &impl Fn(&TestMatrix) -> M)
@@ -207,6 +381,15 @@ where
     let (rows, values) = matrix.sparse_column(3);
     assert_eq!(rows, &[1]);
     assert_eq!(values, &[0.0]);
+
+    let lazy = LazyMatrix::from_parts(matrix, Some(vec![0.5; 4]), Some(vec![2.0; 4]));
+    let column = lazy.sparse_column(0);
+    assert_eq!(column.implicit_value(), -0.25);
+    assert_eq!(column.raw_sum(), -1.0);
+    assert_eq!(
+        column.stored_corrections().collect::<Vec<_>>(),
+        vec![(0, 0.5), (2, 0.0), (3, -1.0)]
+    );
 }
 
 fn lazy_columns_match_dense_oracle<M>(build: &impl Fn(&TestMatrix) -> M)
@@ -230,7 +413,7 @@ where
             );
 
             for j in 0..tm.ncols {
-                let column = lazy.column(j);
+                let column = lazy.sparse_column(j);
                 assert_eq!(column.len(), tm.nrows);
                 assert!(!column.is_empty());
                 assert_eq!(
@@ -276,7 +459,7 @@ where
             );
 
             for j in 0..tm.ncols {
-                let column = lazy.column(j);
+                let column = lazy.sparse_column(j);
                 let expected: Vec<f64> = dense.iter().map(|row| row[j]).collect();
                 let expected_sum: f64 = expected.iter().sum();
                 let expected_norm_squared: f64 = expected.iter().map(|value| value * value).sum();
@@ -332,7 +515,7 @@ where
     }
 
     let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), None, None);
-    let column = lazy.column(0);
+    let column = lazy.sparse_column(0);
     let short = &vector[..vector.len() - 1];
     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| column.dot(short))).is_err());
     assert!(
@@ -384,7 +567,7 @@ where
         triplets: vec![(0, 0, f64::NAN), (2, 0, f64::INFINITY)],
     };
     let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), None, None);
-    let column = lazy.column(0);
+    let column = lazy.sparse_column(0);
     let vector = [1.0, 2.0, 3.0];
     let weights = [0.5, 1.5, 2.0];
     let weighted_vector_sum = vector
@@ -422,7 +605,7 @@ where
         triplets: Vec::new(),
     };
     let lazy = LazyMatrix::<_, f64>::from_parts(build(&no_rows), None, None);
-    let column = lazy.column(0);
+    let column = lazy.sparse_column(0);
     assert_eq!(column.len(), 0);
     assert!(column.is_empty());
     assert!(column.row_indices().is_empty());
@@ -438,11 +621,11 @@ where
     assert_eq!(column.weighted_norm_squared(&[]), 0.0);
     assert_eq!(column.weighted_norm_squared_with_sum(&[], 0.0), 0.0);
 
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lazy.column(2)));
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lazy.sparse_column(2)));
     assert!(result.is_err());
 }
 
-fn reconstruct_column(column: LazyColumn<'_, f64>) -> Vec<f64> {
+fn reconstruct_column(column: LazySparseColumn<'_, f64>) -> Vec<f64> {
     let mut dense = vec![-column.center() / column.scale(); column.len()];
     for (&row, &value) in column.row_indices().iter().zip(column.values()) {
         dense[row] = (value - column.center()) / column.scale();

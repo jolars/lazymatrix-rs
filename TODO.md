@@ -83,7 +83,7 @@ state and solver-specific update logic belong in consuming crates.
 
 ## Operator performance
 
-- [ ] Allow `LazyMatrix` to wrap a borrowed backend matrix.
+- [x] Allow `LazyMatrix` to wrap a borrowed backend matrix.
   - Add forwarding implementations for the matrix capability traits on `&M`,
     or provide an explicit borrowed wrapper with equivalent ergonomics.
   - Support construction such as `LazyMatrix::new(&x, spec)` so fitting paths,
@@ -115,7 +115,7 @@ the current operator and column-view API. The JIT-normalization enum and its
 four-way branches should not be ported: optional centers and scales already
 represent the same four states.
 
-- [ ] Add weighted logical-column products.
+- [x] Add weighted logical-column products.
   - [x] Provide a weighted dot product for
     `x_tilde_j^T (weights * vector)` without materializing the elementwise
     product.
@@ -123,14 +123,14 @@ represent the same four states.
     coordinate-wise Hessian calculations.
   - [x] Offer variants accepting cached `sum(weights * vector)` and
     `sum(weights)` so repeated column operations remain O(nnz_j).
-  - [ ] Accept borrowed inputs without forcing copies of dense matrix columns;
+  - [x] Accept borrowed inputs without forcing copies of dense matrix columns;
     account explicitly for contiguous versus strided vector views.
   - [x] Test each formula against a dense oracle for all four center/scale
     combinations, including implicit and explicitly stored zeros.
 
-- [ ] Make the sparse-plus-offset decomposition of `LazyColumn` easier to use.
-  - Consider accessors such as `implicit_value()` (`-center / scale`),
-    `raw_sum()`, and an iterator over stored corrections (`raw_value / scale`).
+- [x] Make the sparse-plus-offset decomposition of `LazyColumn` easier to use.
+  - Provide `implicit_value()` (`-center / scale`), `raw_sum()`, and an
+    iterator over stored corrections (`raw_value / scale`).
   - Keep these as representation-level column operations. Residual offsets,
     cached residual sums, and coordinate-update policy remain in the consuming
     solver.
@@ -148,13 +148,20 @@ represent the same four states.
     scales from raw `X`; exact legacy behavior for unusual combinations can be
     reproduced with `from_parts`.
 
-- [ ] Add dense backends when work on the Rust SLOPE consumer begins.
-  - Implement the orientation-independent operator and statistics traits for
-    the selected faer and/or nalgebra dense matrix types.
-  - Provide borrowed dense-column access without weakening the contract of
-    `SparseColumns`.
-  - Share logical-column operations across dense and sparse views where their
-    complexity contracts remain honest.
+- [x] Add a generic dense/sparse logical-column interface.
+  - Use `RawColumns` with an associated borrowed view for backend storage and
+    `Columns` with an associated `LogicalColumn` for generic consumers.
+  - Accept contiguous and strided inputs and destinations through
+    `VectorView` / `VectorViewMut` without forcing copies.
+  - Keep `SparseColumns` as the stronger contiguous-CSC capability and expose
+    sparse representation helpers separately from common logical operations.
+
+- [x] Add dense faer and nalgebra backends.
+  - Implement operators, statistics, and raw-column access for owned matrices
+    and immutable backend-native matrix views.
+  - Exercise the same logical-column oracle over dense and sparse storage.
+  - Demonstrate SLOPE-shaped weighted derivatives and active-column updates in
+    the `slope_primitives` example.
 
 - [ ] Benchmark active-set products before adding a restricted-operator API.
   - Full gradients map directly to `MatTransposeVec`, and active-set gradients

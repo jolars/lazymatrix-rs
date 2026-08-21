@@ -43,10 +43,17 @@ liberally.
     latter phrased as a backend vector against a coefficient slice `&[F]`.
   - `ColumnStats` --- column means/sds/maxabs/l2 (+ centered variants), computed
     over stored sparse entries without densifying.
+  - `RawColumns` / `Columns` --- associated borrowed raw and logical views for
+    storage-independent column algorithms.
+  - `VectorView` / `VectorViewMut` --- contiguous or strided dense vector
+    access.
   - `SparseColumns` --- zero-copy access to contiguous CSC column slices.
   - `Centering` / `Scaling` / `Normalization`.
-- `src/lib.rs` --- `LazyMatrix<M, F = f64>` and borrowed `LazyColumn<'a, F>`
-  (generic, dependency-free core), constructors, and the two operator impls.
+- `src/lib.rs` --- `LazyMatrix<M, F = f64>`, generic `LazyColumn<C, F>`, and
+  borrowed `SparseColumnRef<'a, F>` (dependency-free core), constructors, and
+  the two operator impls.
+- `src/faer_dense_backend.rs` / `src/nalgebra_dense_backend.rs` --- dense owned
+  matrices and borrowed/strided views.
 - `src/faer_sparse_backend.rs` --- `[feature = "faer"]`, impls on
   `SparseColMat<usize, F>` / `Col<F>`.
 - `src/nalgebra_sparse_backend.rs` --- `[feature = "nalgebra"]`, impls on
@@ -130,42 +137,46 @@ the operator and express it as a capability trait instead:
   `MatVec`, `MatTransposeVec`, and `ColumnStats`. `ColumnStats` is a single full
   pass (walk columns on CSC, or sweep row-major accumulating per-column sums on
   CSR), so aggregate stats are *not* layout-locked --- only single-element
-  *borrowing* needs a matching orientation.
+  *borrowing* needs a matching orientation. Dense backends also implement
+  `RawColumns`, since indexed columns are naturally available as borrowed
+  views.
 - **Orientation-specific, implemented only where the borrow is contiguous:**
   `SparseColumns` (`sparse_column(j) -> (&[usize], &[F])`, contiguous in CSC)
   and a parallel `SparseRows` (`sparse_row(i) -> (&[usize], &[F])`, contiguous
   in CSR). A backend holding both representations implements both; neither is
   implemented for the wrong layout.
 
-`LazyMatrix::column(j)` is then gated on `M: SparseColumns` and `row(i)` on
-`M: SparseRows`, so a column-sweep solver (e.g. CD) bounding `M: SparseColumns`
-fails to *compile* against a CSR matrix rather than silently doing an
-O(nnz)-per-column gather --- the same capability-as-bound pattern as `new()`'s
-`M: ColumnStats`.
+`LazyMatrix::column(j)` is gated on `M: RawColumns`, while
+`sparse_column(j)` retains the stronger `M: SparseColumns` bound and `row(i)`
+will be gated on `M: SparseRows`. A sparse column-sweep solver bounding
+`M: SparseColumns` therefore fails to *compile* against a CSR matrix rather
+than silently doing an O(nnz)-per-column gather --- the same
+capability-as-bound pattern as `new()`'s `M: ColumnStats`.
 
-Views borrow, never copy. `LazyColumn<'a, F>` borrows the raw column slices and
-copies the two scalars `cⱼ`/`sⱼ`; `LazyRow<'a, F>` borrows the raw row slices
-**and** borrows the whole `centers`/`scales` vectors (a row touches every
-column's scalar, so copying them would be wasteful). Adding CSR is purely
-additive --- new backend types (faer `SparseRowMat`, nalgebra `CsrMatrix`)
-implementing the agnostic three plus `SparseRows`; no churn to the CSC code.
-Name the column trait column-specifically now (not a layout-neutral "sparse
-access") so `SparseRows` is the obvious parallel later.
+Views borrow, never copy. `LazyColumn<C, F>` wraps the backend's associated raw
+view and copies the two scalars `cⱼ`/`sⱼ`; `LazySparseColumn<'a, F>` additionally
+exposes the CSC slices and sparse-plus-offset decomposition. `LazyRow<'a, F>`
+will borrow the raw row slices **and** the whole `centers`/`scales` vectors (a
+row touches every column's scalar, so copying them would be wasteful). Adding
+CSR is purely additive --- new backend types (faer `SparseRowMat`, nalgebra
+`CsrMatrix`) implement the agnostic three plus `SparseRows`; no churn to the CSC
+code.
 
 Borrowing describes the views' representation, not the limit of their API.
-`LazyColumn` should provide correct operations on the logical normalized column,
-such as `dot(&[F])` and column norms, so callers do not have to rederive the
-normalization formulas. Keep the raw slices and normalization parameters
-available for specialized algorithms. Document complexity explicitly: a centered
-`dot(&[F])` needs the dense vector sum and is O(n + nnz), while an additive
-optimized path may accept a cached sum to remain O(nnz). These matrix operations
-belong on the view; solver state and update policies do not.
+`LazyColumn` provides correct operations on the logical normalized column, such
+as dots against `VectorView`, weighted products, scaled additions, and column
+norms, so callers do not have to rederive the normalization formulas. Keep raw
+sparse slices and normalization parameters available for specialized
+algorithms. Document complexity explicitly: a centered dot needs the dense
+vector sum and is O(n + nnz), while a cached-sum path remains O(nnz). These
+matrix operations belong on the view; solver state and update policies do not.
 
 ## Scope (v1)
 
-In: the operator (`matvec` / `mat_transpose_vec`), `ColumnStats`, and borrowed
-CSC column access, over faer-sparse and nalgebra-sparse. Out (deferred,
-recoverable without rework): Gram `X̃ᵀX̃`, norms, SVD, library-level iterative
-solvers, row normalization, dense/ndarray backends, and any FFI. Solvers belong
-in consuming crates---the runnable examples are consumers, while the library
-only provides a faithful linear operator and storage capabilities.
+In: the operator (`matvec` / `mat_transpose_vec`), `ColumnStats`, generic
+borrowed column access over dense and CSC storage, and explicit CSC
+representation access, over faer and nalgebra. Out (deferred, recoverable
+without rework): Gram `X̃ᵀX̃`, SVD, library-level iterative solvers, row
+normalization, ndarray backends, and any FFI. Solvers belong in consuming
+crates---the runnable examples are consumers, while the library only provides a
+faithful linear operator and storage capabilities.
