@@ -12,8 +12,8 @@ use nalgebra_sparse::ops::Op;
 use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
 use crate::traits::{
-    ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, Scalar, ScaledSubSlice,
-    SubScalarAssign, SumEntries,
+    ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
+    ScaledSubSlice, SubScalarAssign, SumEntries,
 };
 
 // --- vector traits on DVector<F> ---------------------------------------------
@@ -61,6 +61,16 @@ impl<F: Scalar + nalgebra::Scalar> ScaledSubSlice<F> for DVector<F> {
 }
 
 // --- operator traits on CscMatrix<F> -----------------------------------------
+
+impl<F> MatrixShape for CscMatrix<F> {
+    fn nrows(&self) -> usize {
+        CscMatrix::nrows(self)
+    }
+
+    fn ncols(&self) -> usize {
+        CscMatrix::ncols(self)
+    }
+}
 
 impl<F> MatVec<DVector<F>> for CscMatrix<F>
 where

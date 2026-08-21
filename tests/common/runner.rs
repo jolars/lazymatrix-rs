@@ -6,7 +6,7 @@
 
 use lazymatrix::{
     Centering, ColumnStats, DotSlice, ElemDivAssign, LazyMatrix, MatTransposeVec, MatVec,
-    Normalization, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries,
+    MatrixShape, Normalization, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -129,6 +129,23 @@ pub fn run_backend_suite<M, V>(
     normalized_matches_oracle(&build, &to_v, &from_v);
     column_stats_fixed(&build);
     zero_scale_guard(&build, &to_v, &from_v);
+    shape_is_inferred(&build);
+}
+
+/// The wrapper obtains its dimensions from the backend matrix.
+fn shape_is_inferred<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: MatrixShape,
+{
+    let tm = random_matrix(21, 7, 4, 0.3);
+    let lazy = LazyMatrix::<_, f64>::raw(build(&tm));
+    assert_eq!(lazy.nrows(), tm.nrows);
+    assert_eq!(lazy.ncols(), tm.ncols);
+
+    let no_columns = random_matrix(22, 3, 0, 0.3);
+    let lazy = LazyMatrix::<_, f64>::raw(build(&no_columns));
+    assert_eq!(lazy.nrows(), no_columns.nrows);
+    assert_eq!(lazy.ncols(), 0);
 }
 
 /// (1) + (3): all four center×scale combinations match the dense oracle, for
@@ -159,7 +176,7 @@ fn oracle_parity<M, V>(
         for &use_s in &[false, true] {
             let c = use_c.then(|| centers.clone());
             let s = use_s.then(|| scales.clone());
-            let lazy = LazyMatrix::new(build(&tm), tm.nrows, tm.ncols, c.clone(), s.clone());
+            let lazy = LazyMatrix::new(build(&tm), c.clone(), s.clone());
             let xtilde = materialize(&tm.dense, c.as_deref(), s.as_deref());
 
             let got = from_v(&lazy.matvec(&v));
@@ -193,7 +210,7 @@ fn adjoint_identity<M, V>(
         .iter()
         .map(|x| x.abs() + 0.3)
         .collect();
-    let lazy = LazyMatrix::new(build(&tm), tm.nrows, tm.ncols, Some(centers), Some(scales));
+    let lazy = LazyMatrix::new(build(&tm), Some(centers), Some(scales));
     let v = to_v(&random_vec(9, tm.ncols));
     let u = to_v(&random_vec(10, tm.nrows));
 
@@ -226,7 +243,7 @@ fn raw_passthrough<M, V>(
     let bare_y = from_v(&bare.matvec(&v));
     let bare_t = from_v(&bare.mat_transpose_vec(&u));
 
-    let lazy = LazyMatrix::raw(build(&tm), tm.nrows, tm.ncols);
+    let lazy = LazyMatrix::raw(build(&tm));
     assert_eq!(from_v(&lazy.matvec(&v)), bare_y);
     assert_eq!(from_v(&lazy.mat_transpose_vec(&u)), bare_t);
 }
@@ -255,7 +272,7 @@ fn normalized_matches_oracle<M, V>(
     for center in centerings {
         for scale in scalings {
             let spec = Normalization::new(center, scale);
-            let lazy = LazyMatrix::normalized(build(&tm), tm.nrows, tm.ncols, spec);
+            let lazy = LazyMatrix::normalized(build(&tm), spec);
             let xtilde = materialize(&tm.dense, lazy.centers(), lazy.scales());
 
             let got = from_v(&lazy.matvec(&v));
@@ -351,7 +368,7 @@ fn zero_scale_guard<M, V>(
         ],
     };
     let spec = Normalization::new(Centering::Mean, Scaling::Sd);
-    let lazy = LazyMatrix::normalized(build(&tm), tm.nrows, tm.ncols, spec);
+    let lazy = LazyMatrix::normalized(build(&tm), spec);
     let scales = lazy.scales().unwrap();
     assert_eq!(scales[1], 1.0, "empty column scale must be floored to 1");
     assert_eq!(scales[2], 1.0, "constant column scale must be floored to 1");

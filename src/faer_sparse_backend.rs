@@ -11,8 +11,8 @@ use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::{Accum, Col, Par};
 
 use crate::traits::{
-    ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, Scalar, ScaledSubSlice,
-    SubScalarAssign, SumEntries,
+    ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
+    ScaledSubSlice, SubScalarAssign, SumEntries,
 };
 
 // --- vector traits on Col<F> (scalar arithmetic only: bound F: Scalar) -------
@@ -65,6 +65,16 @@ impl<F: Scalar> ScaledSubSlice<F> for Col<F> {
 }
 
 // --- operator traits on SparseColMat (need the faer ComplexField bound) -------
+
+impl<F> MatrixShape for SparseColMat<usize, F> {
+    fn nrows(&self) -> usize {
+        self.symbolic().nrows()
+    }
+
+    fn ncols(&self) -> usize {
+        self.symbolic().ncols()
+    }
+}
 
 impl<F> MatVec<Col<F>> for SparseColMat<usize, F>
 where

@@ -108,12 +108,7 @@ fn main() {
     let x = SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &triplets).unwrap();
 
     // Standardize columns lazily (center + unit sd), never forming X − 1cᵀ.
-    let lazy = LazyMatrix::normalized(
-        x,
-        nrows,
-        ncols,
-        Normalization::new(Centering::Mean, Scaling::Sd),
-    );
+    let lazy = LazyMatrix::normalized(x, Normalization::new(Centering::Mean, Scaling::Sd));
 
     // Ground-truth coefficients and a noiseless target y = X̃ β*.
     let beta_star = Col::<f64>::from_fn(ncols, |j| ((j as f64) - 4.5) * 0.5);

@@ -37,17 +37,17 @@
 //! use lazymatrix::{LazyMatrix, MatVec, Normalization, Centering, Scaling};
 //!
 //! // `x` is some backend matrix implementing `MatVec`, `MatTransposeVec`,
-//! // `ColumnStats`; `v` a backend vector.
+//! // `ColumnStats`, `MatrixShape`; `v` a backend vector.
 //! let spec = Normalization::new(Centering::Mean, Scaling::Sd);
-//! let lazy = LazyMatrix::normalized(x, n, p, spec);
+//! let lazy = LazyMatrix::normalized(x, spec);
 //! let y = lazy.matvec(&v); // == ((X − 1cᵀ)S⁻¹) v, sparsity preserved
 //! ```
 
 pub mod traits;
 
 pub use traits::{
-    Centering, ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, Normalization,
-    Scalar, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries,
+    Centering, ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape,
+    Normalization, Scalar, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries,
 };
 
 #[cfg(feature = "faer")]
@@ -69,23 +69,19 @@ pub struct LazyMatrix<M, F = f64> {
     data: M,
     centers: Option<Vec<F>>,
     scales: Option<Vec<F>>,
-    nrows: usize,
-    ncols: usize,
 }
 
-impl<M, F: Scalar> LazyMatrix<M, F> {
+impl<M, F: Scalar> LazyMatrix<M, F>
+where
+    M: MatrixShape,
+{
     /// Construct from an explicit center and/or scale vector.
     ///
     /// # Panics
     /// Panics if a provided `centers`/`scales` vector does not have length
     /// `ncols`.
-    pub fn new(
-        data: M,
-        nrows: usize,
-        ncols: usize,
-        centers: Option<Vec<F>>,
-        scales: Option<Vec<F>>,
-    ) -> Self {
+    pub fn new(data: M, centers: Option<Vec<F>>, scales: Option<Vec<F>>) -> Self {
+        let ncols = data.ncols();
         if let Some(c) = &centers {
             assert_eq!(c.len(), ncols, "centers length must equal ncols");
         }
@@ -96,40 +92,38 @@ impl<M, F: Scalar> LazyMatrix<M, F> {
             data,
             centers,
             scales,
-            nrows,
-            ncols,
         }
     }
 
     /// Wrap a matrix with no normalization (a pure pass-through operator).
-    pub fn raw(data: M, nrows: usize, ncols: usize) -> Self {
-        Self::new(data, nrows, ncols, None, None)
+    pub fn raw(data: M) -> Self {
+        Self::new(data, None, None)
     }
 
     /// Wrap a matrix with column centering only.
     ///
     /// # Panics
     /// Panics if `centers.len() != ncols`.
-    pub fn with_centers(data: M, nrows: usize, ncols: usize, centers: Vec<F>) -> Self {
-        Self::new(data, nrows, ncols, Some(centers), None)
+    pub fn with_centers(data: M, centers: Vec<F>) -> Self {
+        Self::new(data, Some(centers), None)
     }
 
     /// Wrap a matrix with column scaling only.
     ///
     /// # Panics
     /// Panics if `scales.len() != ncols`.
-    pub fn with_scales(data: M, nrows: usize, ncols: usize, scales: Vec<F>) -> Self {
-        Self::new(data, nrows, ncols, None, Some(scales))
+    pub fn with_scales(data: M, scales: Vec<F>) -> Self {
+        Self::new(data, None, Some(scales))
     }
 
-    /// Number of rows of the (logical) normalized matrix.
+    /// Number of rows of the logical normalized matrix.
     pub fn nrows(&self) -> usize {
-        self.nrows
+        self.data.nrows()
     }
 
-    /// Number of columns of the (logical) normalized matrix.
+    /// Number of columns of the logical normalized matrix.
     pub fn ncols(&self) -> usize {
-        self.ncols
+        self.data.ncols()
     }
 
     /// The column centers `c`, if centering is active.
@@ -156,7 +150,7 @@ impl<M, F: Scalar> LazyMatrix<M, F> {
 
 impl<M, F: Scalar> LazyMatrix<M, F>
 where
-    M: ColumnStats<F>,
+    M: ColumnStats<F> + MatrixShape,
 {
     /// Construct by **computing** the centers and scales from `data` according
     /// to `spec`.
@@ -168,7 +162,7 @@ where
     /// Any non-positive scale (e.g. a constant column whose standard deviation
     /// is zero) is floored to `1`, so the resulting operator never divides by
     /// zero.
-    pub fn normalized(data: M, nrows: usize, ncols: usize, spec: Normalization) -> Self {
+    pub fn normalized(data: M, spec: Normalization) -> Self {
         let centers = match spec.center {
             Centering::None => None,
             Centering::Mean => Some(data.col_means()),
@@ -187,7 +181,20 @@ where
             })),
         };
 
-        Self::new(data, nrows, ncols, centers, scales)
+        Self::new(data, centers, scales)
+    }
+}
+
+impl<M, F> MatrixShape for LazyMatrix<M, F>
+where
+    M: MatrixShape,
+{
+    fn nrows(&self) -> usize {
+        self.data.nrows()
+    }
+
+    fn ncols(&self) -> usize {
+        self.data.ncols()
     }
 }
 

@@ -4,9 +4,9 @@
 //!
 //! * [`Scalar`] — the numeric element type, a blanket-implemented bundle of
 //!   `num-traits` bounds.
-//! * [`MatVec`] / [`MatTransposeVec`] — the matrix-free linear-operator
-//!   interface, implemented both by concrete backend matrices and by
-//!   [`LazyMatrix`](crate::LazyMatrix) itself.
+//! * [`MatrixShape`] and [`MatVec`] / [`MatTransposeVec`] — the matrix-free
+//!   linear-operator interface, implemented both by concrete backend matrices
+//!   and by [`LazyMatrix`](crate::LazyMatrix) itself.
 //! * The five *vector* traits ([`ElemDivAssign`], [`DotSlice`],
 //!   [`SubScalarAssign`], [`SumEntries`], [`ScaledSubSlice`]) — the elementwise
 //!   primitives that fold the lazy normalization into a backend vector. They are
@@ -35,15 +35,21 @@ impl<F> Scalar for F where
 {
 }
 
+/// Dimensions of a matrix or linear operator.
+pub trait MatrixShape {
+    fn nrows(&self) -> usize;
+    fn ncols(&self) -> usize;
+}
+
 /// Matrix–vector product `A x`, returning a freshly allocated vector of length
 /// `nrows`.
-pub trait MatVec<V> {
+pub trait MatVec<V>: MatrixShape {
     fn matvec(&self, x: &V) -> V;
 }
 
 /// Transposed matrix–vector product `Aᵀ x`, returning a freshly allocated vector
 /// of length `ncols`.
-pub trait MatTransposeVec<V> {
+pub trait MatTransposeVec<V>: MatrixShape {
     fn mat_transpose_vec(&self, x: &V) -> V;
 }
 
