@@ -5,7 +5,7 @@ use nalgebra::{DVector, Dim, Matrix, MatrixView, U1};
 
 use crate::traits::{
     ColumnStats, MatTransposeVec, MatVec, MatrixShape, RawColumn, RawColumns, Scalar, VectorView,
-    VectorViewMut, max_or_nan,
+    VectorViewMut, max_or_nan, min_or_nan, range_or_nan,
 };
 
 impl<F, R, S> VectorView<F> for Matrix<F, R, U1, S>
@@ -170,9 +170,27 @@ where
             .collect()
     }
 
+    fn col_mins(&self) -> Vec<F> {
+        (0..self.ncols())
+            .map(|j| min_or_nan((0..self.nrows()).map(|i| self[(i, j)])))
+            .collect()
+    }
+
+    fn col_ranges(&self) -> Vec<F> {
+        (0..self.ncols())
+            .map(|j| range_or_nan((0..self.nrows()).map(|i| self[(i, j)])))
+            .collect()
+    }
+
     fn col_maxabs(&self) -> Vec<F> {
         (0..self.ncols())
             .map(|j| max_or_nan((0..self.nrows()).map(|i| self[(i, j)].abs())))
+            .collect()
+    }
+
+    fn col_l1(&self) -> Vec<F> {
+        (0..self.ncols())
+            .map(|j| (0..self.nrows()).map(|i| self[(i, j)].abs()).sum())
             .collect()
     }
 
@@ -202,6 +220,21 @@ where
                     })
                     .sum::<F>()
                     .sqrt()
+            })
+            .collect()
+    }
+
+    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+        assert_eq!(
+            centers.len(),
+            self.ncols(),
+            "col_l1_centered: length mismatch"
+        );
+        (0..self.ncols())
+            .map(|j| {
+                (0..self.nrows())
+                    .map(|i| (self[(i, j)] - centers[j]).abs())
+                    .sum()
             })
             .collect()
     }

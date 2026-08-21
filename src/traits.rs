@@ -74,6 +74,40 @@ pub(crate) fn max_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
     })
 }
 
+/// Returns the minimum value, propagating `NaN` and treating an empty input as
+/// undefined.
+#[cfg(any(feature = "faer", feature = "nalgebra"))]
+pub(crate) fn min_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
+    values
+        .fold(None, |minimum: Option<F>, value| {
+            Some(match minimum {
+                None => value,
+                Some(minimum) if minimum.is_nan() || value.is_nan() => F::nan(),
+                Some(minimum) => minimum.min(value),
+            })
+        })
+        .unwrap_or_else(F::nan)
+}
+
+/// Returns `max - min`, propagating `NaN` and treating an empty input as
+/// undefined.
+#[cfg(any(feature = "faer", feature = "nalgebra"))]
+pub(crate) fn range_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
+    values
+        .fold(None, |extrema: Option<(F, F)>, value| {
+            Some(match extrema {
+                None => (value, value),
+                Some((minimum, maximum))
+                    if minimum.is_nan() || maximum.is_nan() || value.is_nan() =>
+                {
+                    (F::nan(), F::nan())
+                }
+                Some((minimum, maximum)) => (minimum.min(value), maximum.max(value)),
+            })
+        })
+        .map_or_else(F::nan, |(minimum, maximum)| maximum - minimum)
+}
+
 /// Dimensions of a matrix or linear operator.
 pub trait MatrixShape {
     fn nrows(&self) -> usize;
@@ -400,8 +434,9 @@ pub trait ScaledSubSlice<F: Scalar> {
 /// by `n`, the number of rows), matching the design-matrix normalization used by
 /// the R `lazymatrix` package.
 ///
-/// Statistics follow IEEE floating-point behavior. In particular, means and
-/// standard deviations of a zero-row column are `NaN`, and a stored `NaN`
+/// Statistics follow IEEE floating-point behavior. In particular, means,
+/// standard deviations, minima, and ranges of a zero-row column are `NaN`;
+/// un-centered norms of a zero-row column are zero; and a stored `NaN`
 /// propagates through every statistic.
 pub trait ColumnStats<F: Scalar> {
     /// Column means `c_j = (Σ_i x_ij) / n`.
@@ -413,8 +448,17 @@ pub trait ColumnStats<F: Scalar> {
     /// centered column. Implementations use a stable two-pass calculation.
     fn col_sds(&self) -> Vec<F>;
 
+    /// Column minima `min_i x_ij` of the un-centered column.
+    fn col_mins(&self) -> Vec<F>;
+
+    /// Column ranges `max_i x_ij - min_i x_ij` of the un-centered column.
+    fn col_ranges(&self) -> Vec<F>;
+
     /// Column max-absolute values `max_i |x_ij|` of the un-centered column.
     fn col_maxabs(&self) -> Vec<F>;
+
+    /// Column 1-norms `‖x_j‖₁` of the un-centered column.
+    fn col_l1(&self) -> Vec<F>;
 
     /// Column 2-norms `‖x_j‖₂` of the un-centered column.
     fn col_l2(&self) -> Vec<F>;
@@ -425,6 +469,13 @@ pub trait ColumnStats<F: Scalar> {
     /// `‖x_j − c_j‖₂² = Σ_stored (v − c_j)² + (n − nnz_j)·c_j²`,
     /// so it never densifies. `centers` must have length `ncols`.
     fn col_l2_centered(&self, centers: &[F]) -> Vec<F>;
+
+    /// Column 1-norms of the **centered** columns, `‖x_j − c_j·1‖₁`.
+    ///
+    /// Computed sparsely via the closed form
+    /// `Σ_stored |v − c_j| + (n − nnz_j)·|c_j|`, so it never densifies.
+    /// `centers` must have length `ncols`.
+    fn col_l1_centered(&self, centers: &[F]) -> Vec<F>;
 
     /// Column max-absolute values of the **centered** columns,
     /// `max_i |x_ij − c_j|`.
@@ -447,8 +498,20 @@ where
         (**self).col_sds()
     }
 
+    fn col_mins(&self) -> Vec<F> {
+        (**self).col_mins()
+    }
+
+    fn col_ranges(&self) -> Vec<F> {
+        (**self).col_ranges()
+    }
+
     fn col_maxabs(&self) -> Vec<F> {
         (**self).col_maxabs()
+    }
+
+    fn col_l1(&self) -> Vec<F> {
+        (**self).col_l1()
     }
 
     fn col_l2(&self) -> Vec<F> {
@@ -457,6 +520,10 @@ where
 
     fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
         (**self).col_l2_centered(centers)
+    }
+
+    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+        (**self).col_l1_centered(centers)
     }
 
     fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
@@ -472,6 +539,8 @@ pub enum Centering {
     None,
     /// Subtract the column mean.
     Mean,
+    /// Subtract the column minimum.
+    Min,
 }
 
 /// How to scale each column.
@@ -484,15 +553,21 @@ pub enum Scaling {
     Sd,
     /// Divide by the maximum absolute value.
     MaxAbs,
+    /// Divide by the 1-norm.
+    L1,
     /// Divide by the 2-norm.
     L2,
+    /// Divide by the range, `max - min`.
+    Range,
 }
 
 /// A full normalization specification: an independent [`Centering`] and
 /// [`Scaling`] choice.
 ///
 /// When both are active, scales are computed from the **centered** columns
-/// (see [`ColumnStats::col_l2_centered`] / [`ColumnStats::col_maxabs_centered`]).
+/// Non-translation-invariant scales are computed from centered columns (see
+/// [`ColumnStats::col_l1_centered`], [`ColumnStats::col_l2_centered`], and
+/// [`ColumnStats::col_maxabs_centered`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Normalization {
     pub center: Centering,

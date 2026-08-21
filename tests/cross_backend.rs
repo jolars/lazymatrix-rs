@@ -35,8 +35,15 @@ fn faer_and_nalgebra_agree() {
     let v = random_vec(43, tm.ncols);
     let u = random_vec(44, tm.nrows);
 
-    for center in [Centering::None, Centering::Mean] {
-        for scale in [Scaling::None, Scaling::Sd, Scaling::MaxAbs, Scaling::L2] {
+    for center in [Centering::None, Centering::Mean, Centering::Min] {
+        for scale in [
+            Scaling::None,
+            Scaling::Sd,
+            Scaling::L1,
+            Scaling::L2,
+            Scaling::MaxAbs,
+            Scaling::Range,
+        ] {
             let spec = Normalization::new(center, scale);
 
             let f = LazyMatrix::new(faer_mat(&tm), spec);

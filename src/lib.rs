@@ -552,8 +552,9 @@ where
     /// to `spec`.
     ///
     /// When both centering and scaling are requested, scales are computed from
-    /// the *centered* columns (standard deviation is centering-invariant; `L2`
-    /// and `MaxAbs` are not, and use the sparse closed-form centered variants).
+    /// the *centered* columns. Standard deviation and range are
+    /// centering-invariant; `L1`, `L2`, and `MaxAbs` use sparse closed-form
+    /// centered variants.
     ///
     /// An exact zero scale (e.g. a constant column whose standard deviation is
     /// zero) is replaced with `1`, so the resulting operator never divides by
@@ -563,11 +564,16 @@ where
         let centers = match spec.center {
             Centering::None => None,
             Centering::Mean => Some(data.col_means()),
+            Centering::Min => Some(data.col_mins()),
         };
 
         let scales = match spec.scale {
             Scaling::None => None,
             Scaling::Sd => Some(replace_zero_scales(data.col_sds())),
+            Scaling::L1 => Some(replace_zero_scales(match &centers {
+                Some(c) => data.col_l1_centered(c),
+                None => data.col_l1(),
+            })),
             Scaling::MaxAbs => Some(replace_zero_scales(match &centers {
                 Some(c) => data.col_maxabs_centered(c),
                 None => data.col_maxabs(),
@@ -576,6 +582,7 @@ where
                 Some(c) => data.col_l2_centered(c),
                 None => data.col_l2(),
             })),
+            Scaling::Range => Some(replace_zero_scales(data.col_ranges())),
         };
 
         Self::from_parts(data, centers, scales)

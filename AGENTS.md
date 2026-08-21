@@ -41,8 +41,8 @@ liberally.
     `ScaleAssign`) plus five normalization primitives (`ElemDivAssign`,
     `DotSlice`, `SubScalarAssign`, `SumEntries`, `ScaledSubSlice`), with the
     latter phrased as a backend vector against a coefficient slice `&[F]`.
-  - `ColumnStats` --- column means/sds/maxabs/l2 (+ centered variants), computed
-    over stored sparse entries without densifying.
+  - `ColumnStats` --- column means/sds/minima/ranges/l1/maxabs/l2 (+ centered
+    variants), computed over stored sparse entries without densifying.
   - `RawColumns` / `Columns` --- associated borrowed raw and logical views for
     storage-independent column algorithms.
   - `VectorView` / `VectorViewMut` --- contiguous or strided dense vector
@@ -77,9 +77,10 @@ matrix/vector pair; no FFI lives in this crate.
   constant/zero-variance column never divides by zero. Nonfinite statistics
   retain their IEEE values.
 - When both centering and scaling are on, scales come from the **centered**
-  column. `sd` is centering-invariant; `l2`/`maxabs` use the sparse closed-form
-  `*_centered` variants
-  (`‖x_j − c_j‖₂² = Σ_stored (v − c_j)² + (n − nnz_j)·c_j²`).
+  column. `sd` and `range` are centering-invariant; `l1`/`l2`/`maxabs` use the
+  sparse closed-form `*_centered` variants
+  (`‖x_j − c_j‖₁ = Σ_stored |v − c_j| + (n − nnz_j)·|c_j|` and
+  `‖x_j − c_j‖₂² = Σ_stored (v − c_j)² + (n − nnz_j)·c_j²`).
 
 ## Commands
 

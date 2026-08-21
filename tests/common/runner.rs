@@ -136,6 +136,8 @@ pub fn run_backend_suite<M, V>(
     from_parts_passthrough(&build, &to_v, &from_v);
     new_matches_oracle(&build, &to_v, &from_v);
     column_stats_fixed(&build);
+    column_stats_respect_sparse_storage(&build);
+    normalization_statistic_dispatch(&build);
     column_sds_large_offset(&build);
     zero_scale_guard(&build, &to_v, &from_v);
     empty_and_nonfinite_stats(&build);
@@ -671,7 +673,10 @@ where
     let matrix = build(&no_rows);
     assert!(matrix.col_means().iter().all(|value| value.is_nan()));
     assert!(matrix.col_sds().iter().all(|value| value.is_nan()));
+    assert!(matrix.col_mins().iter().all(|value| value.is_nan()));
+    assert!(matrix.col_ranges().iter().all(|value| value.is_nan()));
     assert_eq!(matrix.col_maxabs(), vec![0.0, 0.0]);
+    assert_eq!(matrix.col_l1(), vec![0.0, 0.0]);
     assert_eq!(matrix.col_l2(), vec![0.0, 0.0]);
 
     let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd));
@@ -687,8 +692,12 @@ where
     let matrix = build(&nan_column);
     assert!(matrix.col_means()[0].is_nan());
     assert!(matrix.col_sds()[0].is_nan());
+    assert!(matrix.col_mins()[0].is_nan());
+    assert!(matrix.col_ranges()[0].is_nan());
     assert!(matrix.col_maxabs()[0].is_nan());
+    assert!(matrix.col_l1()[0].is_nan());
     assert!(matrix.col_l2()[0].is_nan());
+    assert!(matrix.col_l1_centered(&[0.0])[0].is_nan());
     assert!(matrix.col_l2_centered(&[0.0])[0].is_nan());
     assert!(matrix.col_maxabs_centered(&[0.0])[0].is_nan());
 
@@ -856,8 +865,15 @@ fn new_matches_oracle<M, V>(
     let v = to_v(&random_vec(15, tm.ncols));
     let u = to_v(&random_vec(16, tm.nrows));
 
-    let centerings = [Centering::None, Centering::Mean];
-    let scalings = [Scaling::None, Scaling::Sd, Scaling::MaxAbs, Scaling::L2];
+    let centerings = [Centering::None, Centering::Mean, Centering::Min];
+    let scalings = [
+        Scaling::None,
+        Scaling::Sd,
+        Scaling::L1,
+        Scaling::L2,
+        Scaling::MaxAbs,
+        Scaling::Range,
+    ];
     for center in centerings {
         for scale in scalings {
             let spec = Normalization::new(center, scale);
@@ -873,7 +889,7 @@ fn new_matches_oracle<M, V>(
 }
 
 /// (5): `ColumnStats` against hand-computed values on a fixed tiny matrix,
-/// including the centered-l2/maxabs implicit-zero corrections.
+/// including the centered L1/L2/maxabs implicit-zero corrections.
 ///
 /// ```text
 /// X = | 1  0  5 |
@@ -906,10 +922,14 @@ where
     assert_close(&m.col_means(), &[4.0 / 3.0, 0.0, 5.0], EPS);
     // population sd: col0 var = 10/3 − (4/3)² = 14/9; col1 = 0; col2 constant = 0
     assert_close(&m.col_sds(), &[(14.0_f64 / 9.0).sqrt(), 0.0, 0.0], EPS);
+    assert_close(&m.col_mins(), &[0.0, 0.0, 5.0], EPS);
+    assert_close(&m.col_ranges(), &[3.0, 0.0, 0.0], EPS);
     assert_close(&m.col_maxabs(), &[3.0, 0.0, 5.0], EPS);
+    assert_close(&m.col_l1(), &[4.0, 0.0, 15.0], EPS);
     assert_close(&m.col_l2(), &[10.0_f64.sqrt(), 0.0, (75.0_f64).sqrt()], EPS);
 
     let centers = m.col_means();
+    assert_close(&m.col_l1_centered(&centers), &[10.0 / 3.0, 0.0, 0.0], EPS);
     // centered l2² of col0 = n·var = 3·14/9 = 14/3; col1 = 0; col2 = 0
     assert_close(
         &m.col_l2_centered(&centers),
@@ -922,6 +942,69 @@ where
         &[5.0 / 3.0, 0.0, 0.0],
         EPS,
     );
+
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            m.col_l1_centered(&centers[..2])
+        }))
+        .is_err()
+    );
+}
+
+/// Structural zeros affect extrema, while a fully stored positive column does
+/// not acquire an artificial zero. Explicitly stored zeros count as values.
+fn column_stats_respect_sparse_storage<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: ColumnStats<f64>,
+{
+    let matrix = build(&column_view_matrix());
+
+    assert_close(&matrix.col_mins(), &[-2.0, 0.0, 4.0, 0.0], EPS);
+    assert_close(&matrix.col_ranges(), &[3.0, 0.0, 3.0, 0.0], EPS);
+    assert_close(&matrix.col_l1(), &[3.0, 0.0, 22.0, 0.0], EPS);
+    assert_close(
+        &matrix.col_l1_centered(&[0.5, -1.0, 2.0, 3.0]),
+        &[4.0, 4.0, 14.0, 12.0],
+        EPS,
+    );
+}
+
+/// `LazyMatrix::new` selects raw or centered statistics according to the
+/// normalization specification and applies the exact-zero scale guard.
+fn normalization_statistic_dispatch<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: ColumnStats<f64> + MatrixShape,
+{
+    let tm = TestMatrix {
+        nrows: 3,
+        ncols: 3,
+        dense: vec![
+            vec![1.0, 0.0, 5.0],
+            vec![3.0, 0.0, 5.0],
+            vec![0.0, 0.0, 5.0],
+        ],
+        triplets: vec![
+            (0, 0, 1.0),
+            (1, 0, 3.0),
+            (0, 2, 5.0),
+            (1, 2, 5.0),
+            (2, 2, 5.0),
+        ],
+    };
+
+    let raw_l1 = LazyMatrix::new(build(&tm), Normalization::new(Centering::None, Scaling::L1));
+    assert_close(raw_l1.scales().unwrap(), &[4.0, 1.0, 15.0], EPS);
+
+    let centered_l1 = LazyMatrix::new(build(&tm), Normalization::new(Centering::Mean, Scaling::L1));
+    assert_close(centered_l1.centers().unwrap(), &[4.0 / 3.0, 0.0, 5.0], EPS);
+    assert_close(centered_l1.scales().unwrap(), &[10.0 / 3.0, 1.0, 1.0], EPS);
+
+    let min_range = LazyMatrix::new(
+        build(&tm),
+        Normalization::new(Centering::Min, Scaling::Range),
+    );
+    assert_close(min_range.centers().unwrap(), &[0.0, 0.0, 5.0], EPS);
+    assert_close(min_range.scales().unwrap(), &[3.0, 1.0, 1.0], EPS);
 }
 
 /// (6): a constant column (sd 0) is floored to scale 1 → finite output.
@@ -956,13 +1039,18 @@ fn zero_scale_guard<M, V>(
             (2, 2, 4.0),
         ],
     };
-    let spec = Normalization::new(Centering::Mean, Scaling::Sd);
-    let lazy = LazyMatrix::new(build(&tm), spec);
-    let scales = lazy.scales().unwrap();
-    assert_eq!(scales[1], 1.0, "empty column scale must be floored to 1");
-    assert_eq!(scales[2], 1.0, "constant column scale must be floored to 1");
+    for spec in [
+        Normalization::new(Centering::Mean, Scaling::Sd),
+        Normalization::new(Centering::Mean, Scaling::L1),
+        Normalization::new(Centering::Min, Scaling::Range),
+    ] {
+        let lazy = LazyMatrix::new(build(&tm), spec);
+        let scales = lazy.scales().unwrap();
+        assert_eq!(scales[1], 1.0, "empty column scale must be floored to 1");
+        assert_eq!(scales[2], 1.0, "constant column scale must be floored to 1");
 
-    let v = to_v(&random_vec(20, tm.ncols));
-    let y = from_v(&lazy.matvec(&v));
-    assert!(y.iter().all(|x| x.is_finite()), "output must be finite");
+        let v = to_v(&random_vec(20, tm.ncols));
+        let y = from_v(&lazy.matvec(&v));
+        assert!(y.iter().all(|x| x.is_finite()), "output must be finite");
+    }
 }

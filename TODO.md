@@ -137,7 +137,7 @@ represent the same four states.
   - Use the coordinate-descent example to verify that a centered residual
     update can stay O(nnz_j) without rederiving normalization formulas.
 
-- [ ] Add the remaining normalization statistics used by `libslope`.
+- [x] Add the remaining normalization statistics used by `libslope`.
   - Add minimum centering and L1 and range scaling.
   - Extend `ColumnStats` with sparse-aware minima, ranges, L1 norms, and
     centered L1 norms. Implicit zeros must participate in every statistic.

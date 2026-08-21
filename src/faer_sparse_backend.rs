@@ -15,7 +15,7 @@ use crate::SparseColumnRef;
 use crate::traits::{
     ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec, MatrixShape,
     RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns,
-    SubScalarAssign, SumEntries, max_or_nan, sparse_column_sd,
+    SubScalarAssign, SumEntries, max_or_nan, min_or_nan, range_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on Col<F> (scalar arithmetic only: bound F: Scalar) -------
@@ -210,6 +210,40 @@ where
             .collect()
     }
 
+    fn col_mins(&self) -> Vec<F> {
+        let nrows = self.nrows();
+        let col_ptr = self.col_ptr();
+        let vals = self.val();
+        (0..self.ncols())
+            .map(|j| {
+                let (start, end) = (col_ptr[j], col_ptr[j + 1]);
+                min_or_nan(
+                    vals[start..end]
+                        .iter()
+                        .copied()
+                        .chain((end - start < nrows).then_some(F::zero())),
+                )
+            })
+            .collect()
+    }
+
+    fn col_ranges(&self) -> Vec<F> {
+        let nrows = self.nrows();
+        let col_ptr = self.col_ptr();
+        let vals = self.val();
+        (0..self.ncols())
+            .map(|j| {
+                let (start, end) = (col_ptr[j], col_ptr[j + 1]);
+                range_or_nan(
+                    vals[start..end]
+                        .iter()
+                        .copied()
+                        .chain((end - start < nrows).then_some(F::zero())),
+                )
+            })
+            .collect()
+    }
+
     fn col_maxabs(&self) -> Vec<F> {
         let col_ptr = self.col_ptr();
         let vals = self.val();
@@ -217,6 +251,17 @@ where
             .map(|j| {
                 let (start, end) = (col_ptr[j], col_ptr[j + 1]);
                 max_or_nan(vals[start..end].iter().map(|v| v.abs()))
+            })
+            .collect()
+    }
+
+    fn col_l1(&self) -> Vec<F> {
+        let col_ptr = self.col_ptr();
+        let vals = self.val();
+        (0..self.ncols())
+            .map(|j| {
+                let (start, end) = (col_ptr[j], col_ptr[j + 1]);
+                vals[start..end].iter().map(|value| value.abs()).sum()
             })
             .collect()
     }
@@ -251,6 +296,32 @@ where
                 let stored: F = vals[start..end].iter().map(|&v| (v - c) * (v - c)).sum();
                 let implicit = F::from_usize(nrows - nnz).unwrap();
                 (stored + implicit * c * c).sqrt()
+            })
+            .collect()
+    }
+
+    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+        assert_eq!(
+            centers.len(),
+            self.ncols(),
+            "col_l1_centered: length mismatch"
+        );
+        let nrows = self.nrows();
+        let col_ptr = self.col_ptr();
+        let vals = self.val();
+        (0..self.ncols())
+            .map(|j| {
+                let (start, end) = (col_ptr[j], col_ptr[j + 1]);
+                let center = centers[j];
+                let stored: F = vals[start..end]
+                    .iter()
+                    .map(|&value| (value - center).abs())
+                    .sum();
+                if end - start < nrows {
+                    stored + F::from_usize(nrows - (end - start)).unwrap() * center.abs()
+                } else {
+                    stored
+                }
             })
             .collect()
     }
