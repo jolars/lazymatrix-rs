@@ -3,6 +3,8 @@
   ...
 }:
 {
+  env.OPENBLAS_LP64_LIB = "${pkgs.openblasCompat}/lib";
+
   packages = with pkgs; [
     go-task
     llvmPackages.bintools
@@ -25,9 +27,7 @@
   languages = {
     rust = {
       enable = true;
-      channel = "stable";
-      version = "1.88.0";
-      targets = [ "wasm32-unknown-unknown" ];
+      toolchainFile = ./rust-toolchain.toml;
     };
   };
 
