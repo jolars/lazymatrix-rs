@@ -180,6 +180,8 @@ where
 {
     sparse_columns_expose_raw_storage(&build);
     lazy_columns_match_dense_oracle(&build);
+    lazy_column_operations_match_dense_oracle(&build);
+    lazy_column_operations_handle_nonfinite_values(&build);
     empty_and_out_of_bounds_columns(&build);
 }
 
@@ -244,6 +246,83 @@ where
     }
 }
 
+fn lazy_column_operations_match_dense_oracle<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: SparseColumns<f64>,
+{
+    let tm = column_view_matrix();
+    let centers = vec![0.5, -1.0, 2.0, 3.0];
+    let scales = vec![2.0, 4.0, 0.5, 1.5];
+    let vector = vec![1.5, -2.0, 0.25, 3.0];
+    let vector_sum = vector.iter().sum();
+
+    for &use_center in &[false, true] {
+        for &use_scale in &[false, true] {
+            let active_centers = use_center.then(|| centers.clone());
+            let active_scales = use_scale.then(|| scales.clone());
+            let lazy =
+                LazyMatrix::from_parts(build(&tm), active_centers.clone(), active_scales.clone());
+            let dense = materialize(
+                &tm.dense,
+                active_centers.as_deref(),
+                active_scales.as_deref(),
+            );
+
+            for j in 0..tm.ncols {
+                let column = lazy.column(j);
+                let expected: Vec<f64> = dense.iter().map(|row| row[j]).collect();
+                let expected_sum: f64 = expected.iter().sum();
+                let expected_norm_squared: f64 = expected.iter().map(|value| value * value).sum();
+                let expected_dot = dot(&expected, &vector);
+
+                approx::assert_abs_diff_eq!(column.sum(), expected_sum, epsilon = EPS);
+                approx::assert_abs_diff_eq!(
+                    column.norm_squared(),
+                    expected_norm_squared,
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(column.dot(&vector), expected_dot, epsilon = EPS);
+                approx::assert_abs_diff_eq!(
+                    column.dot_with_sum(&vector, vector_sum),
+                    expected_dot,
+                    epsilon = EPS
+                );
+            }
+        }
+    }
+
+    let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), None, None);
+    let column = lazy.column(0);
+    let short = &vector[..vector.len() - 1];
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| column.dot(short))).is_err());
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            column.dot_with_sum(short, short.iter().sum())
+        }))
+        .is_err()
+    );
+}
+
+fn lazy_column_operations_handle_nonfinite_values<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: SparseColumns<f64>,
+{
+    let tm = TestMatrix {
+        nrows: 3,
+        ncols: 1,
+        dense: vec![vec![f64::NAN], vec![0.0], vec![f64::INFINITY]],
+        triplets: vec![(0, 0, f64::NAN), (2, 0, f64::INFINITY)],
+    };
+    let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), None, None);
+    let column = lazy.column(0);
+    let vector = [1.0, 2.0, 3.0];
+
+    assert!(column.sum().is_nan());
+    assert!(column.norm_squared().is_nan());
+    assert!(column.dot(&vector).is_nan());
+    assert!(column.dot_with_sum(&vector, vector.iter().sum()).is_nan());
+}
+
 fn empty_and_out_of_bounds_columns<M>(build: &impl Fn(&TestMatrix) -> M)
 where
     M: SparseColumns<f64>,
@@ -262,6 +341,10 @@ where
     assert!(column.values().is_empty());
     assert_eq!(column.center(), 0.0);
     assert_eq!(column.scale(), 1.0);
+    assert_eq!(column.sum(), 0.0);
+    assert_eq!(column.norm_squared(), 0.0);
+    assert_eq!(column.dot(&[]), 0.0);
+    assert_eq!(column.dot_with_sum(&[], 0.0), 0.0);
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lazy.column(2)));
     assert!(result.is_err());

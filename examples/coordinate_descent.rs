@@ -20,6 +20,7 @@ use rand_chacha::ChaCha8Rng;
 #[derive(Clone, Copy)]
 struct ColumnSummary {
     raw_sum: f64,
+    sum: f64,
     norm_squared: f64,
 }
 
@@ -38,12 +39,8 @@ impl OffsetResidual {
         }
     }
 
-    fn sum(&self) -> f64 {
-        self.base_sum + self.base.len() as f64 * self.offset
-    }
-
-    fn value(&self, row: usize) -> f64 {
-        self.base[row] + self.offset
+    fn column_dot(&self, column: LazyColumn<'_, f64>, column_sum: f64) -> f64 {
+        column.dot_with_sum(&self.base, self.base_sum) + self.offset * column_sum
     }
 
     fn subtract_column(
@@ -80,32 +77,12 @@ struct CoordinateDescentResult {
 
 fn summarize_column(column: LazyColumn<'_, f64>) -> ColumnSummary {
     let raw_sum = column.values().iter().sum();
-    let center = column.center();
-    let stored_squared_deviations: f64 = column
-        .values()
-        .iter()
-        .map(|&value| {
-            let deviation = value - center;
-            deviation * deviation
-        })
-        .sum();
-    let implicit_count = column.len() - column.values().len();
-    let centered_norm_squared = stored_squared_deviations + implicit_count as f64 * center * center;
 
     ColumnSummary {
         raw_sum,
-        norm_squared: centered_norm_squared / (column.scale() * column.scale()),
+        sum: column.sum(),
+        norm_squared: column.norm_squared(),
     }
-}
-
-fn column_residual_dot(column: LazyColumn<'_, f64>, residual: &OffsetResidual) -> f64 {
-    let raw_dot: f64 = column
-        .row_indices()
-        .iter()
-        .zip(column.values())
-        .map(|(&row, &value)| value * residual.value(row))
-        .sum();
-    (raw_dot - column.center() * residual.sum()) / column.scale()
 }
 
 fn soft_threshold(value: f64, lambda: f64) -> f64 {
@@ -122,6 +99,7 @@ fn kkt_violation<M>(
     matrix: &LazyMatrix<M, f64>,
     beta: &[f64],
     residual: &OffsetResidual,
+    summaries: &[ColumnSummary],
     lambda: f64,
 ) -> f64
 where
@@ -129,7 +107,7 @@ where
 {
     (0..matrix.ncols())
         .map(|j| {
-            let correlation = column_residual_dot(matrix.column(j), residual);
+            let correlation = residual.column_dot(matrix.column(j), summaries[j].sum);
             if beta[j] > 0.0 {
                 (correlation - lambda).abs()
             } else if beta[j] < 0.0 {
@@ -161,7 +139,7 @@ where
     for sweep in 1..=max_sweeps {
         for j in 0..matrix.ncols() {
             let summary = summaries[j];
-            let correlation = column_residual_dot(matrix.column(j), &residual);
+            let correlation = residual.column_dot(matrix.column(j), summary.sum);
             let partial_correlation = correlation + summary.norm_squared * beta[j];
             let updated = if summary.norm_squared == 0.0 {
                 0.0
@@ -175,7 +153,7 @@ where
             }
         }
 
-        let violation = kkt_violation(matrix, &beta, &residual, lambda);
+        let violation = kkt_violation(matrix, &beta, &residual, &summaries, lambda);
         if violation <= tolerance {
             return CoordinateDescentResult {
                 beta,
@@ -186,7 +164,7 @@ where
         }
     }
 
-    let violation = kkt_violation(matrix, &beta, &residual, lambda);
+    let violation = kkt_violation(matrix, &beta, &residual, &summaries, lambda);
     CoordinateDescentResult {
         beta,
         residual,
@@ -226,7 +204,10 @@ fn main() {
 
     let initial_residual = OffsetResidual::new(&y);
     let lambda_max = (0..ncols)
-        .map(|j| column_residual_dot(matrix.column(j), &initial_residual).abs())
+        .map(|j| {
+            let column = matrix.column(j);
+            initial_residual.column_dot(column, column.sum()).abs()
+        })
         .fold(0.0, f64::max);
     let lambda = 0.1 * lambda_max;
     let tolerance = 1.0e-8;

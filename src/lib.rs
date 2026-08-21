@@ -112,6 +112,77 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
     pub fn scale(&self) -> F {
         self.scale
     }
+
+    /// Sum of the logical normalized entries.
+    ///
+    /// This takes O(nnz) time and does not materialize the column.
+    pub fn sum(&self) -> F {
+        let raw_sum = self.values.iter().copied().sum::<F>();
+        let len = F::from_usize(self.len).unwrap();
+        (raw_sum - len * self.center) / self.scale
+    }
+
+    /// Squared Euclidean norm of the logical normalized column.
+    ///
+    /// Structurally absent entries contribute `center² / scale²`. This takes
+    /// O(nnz) time and does not materialize the column.
+    pub fn norm_squared(&self) -> F {
+        let stored_squared_deviations = self
+            .values
+            .iter()
+            .map(|&value| {
+                let deviation = value - self.center;
+                deviation * deviation
+            })
+            .sum::<F>();
+        let implicit_count = F::from_usize(self.len - self.values.len()).unwrap();
+        let centered_norm_squared =
+            stored_squared_deviations + implicit_count * self.center * self.center;
+        centered_norm_squared / (self.scale * self.scale)
+    }
+
+    /// Dot product of the logical normalized column with a dense vector.
+    ///
+    /// Computing the vector sum takes O(n) time, after which the stored-entry
+    /// dot product takes O(nnz). Use [`Self::dot_with_sum`] when the vector sum
+    /// is already available.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `vector.len() != self.len()`.
+    pub fn dot(&self, vector: &[F]) -> F {
+        assert_eq!(
+            vector.len(),
+            self.len,
+            "vector length must equal column length"
+        );
+        let vector_sum = vector.iter().copied().sum();
+        self.dot_with_sum(vector, vector_sum)
+    }
+
+    /// Dot product using a precomputed sum of the dense vector.
+    ///
+    /// `vector_sum` must equal `vector.iter().sum()`. Supplying the cached sum
+    /// keeps this operation O(nnz), which is useful when repeatedly taking
+    /// column products with the same vector.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `vector.len() != self.len()`.
+    pub fn dot_with_sum(&self, vector: &[F], vector_sum: F) -> F {
+        assert_eq!(
+            vector.len(),
+            self.len,
+            "vector length must equal column length"
+        );
+        let raw_dot = self
+            .row_indices
+            .iter()
+            .zip(self.values)
+            .map(|(&row, &value)| value * vector[row])
+            .sum::<F>();
+        (raw_dot - self.center * vector_sum) / self.scale
+    }
 }
 
 /// A matrix presented with lazy column normalization `X̃ = (X − 1cᵀ)S⁻¹`.
