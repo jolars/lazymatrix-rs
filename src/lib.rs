@@ -183,6 +183,117 @@ impl<'a, F: Scalar> LazyColumn<'a, F> {
             .sum::<F>();
         (raw_dot - self.center * vector_sum) / self.scale
     }
+
+    /// Weighted dot product of the logical normalized column with a dense
+    /// vector, `sum_i weights[i] * self[i] * vector[i]`.
+    ///
+    /// Computing the weighted vector sum takes O(n) time, after which the
+    /// stored-entry product takes O(nnz). Use [`Self::weighted_dot_with_sum`]
+    /// when `sum_i weights[i] * vector[i]` is already available.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `vector.len() == weights.len() == self.len()`.
+    pub fn weighted_dot(&self, vector: &[F], weights: &[F]) -> F {
+        assert_eq!(
+            vector.len(),
+            self.len,
+            "vector length must equal column length"
+        );
+        assert_eq!(
+            weights.len(),
+            self.len,
+            "weights length must equal column length"
+        );
+        let weighted_vector_sum = vector
+            .iter()
+            .zip(weights)
+            .map(|(&value, &weight)| value * weight)
+            .sum();
+        self.weighted_dot_with_sum(vector, weights, weighted_vector_sum)
+    }
+
+    /// Weighted dot product using a precomputed weighted vector sum.
+    ///
+    /// `weighted_vector_sum` must equal
+    /// `sum_i weights[i] * vector[i]`. Supplying it keeps this operation
+    /// O(nnz), which is useful for repeatedly computing weighted correlations
+    /// against different columns.
+    ///
+    /// # Panics
+    ///
+    /// Panics unless `vector.len() == weights.len() == self.len()`.
+    pub fn weighted_dot_with_sum(&self, vector: &[F], weights: &[F], weighted_vector_sum: F) -> F {
+        assert_eq!(
+            vector.len(),
+            self.len,
+            "vector length must equal column length"
+        );
+        assert_eq!(
+            weights.len(),
+            self.len,
+            "weights length must equal column length"
+        );
+        let raw_weighted_dot = self
+            .row_indices
+            .iter()
+            .zip(self.values)
+            .map(|(&row, &value)| value * weights[row] * vector[row])
+            .sum::<F>();
+        (raw_weighted_dot - self.center * weighted_vector_sum) / self.scale
+    }
+
+    /// Weighted squared Euclidean norm of the logical normalized column,
+    /// `sum_i weights[i] * self[i]^2`.
+    ///
+    /// Computing the weight sum takes O(n) time, after which the stored-entry
+    /// calculation takes O(nnz). Use
+    /// [`Self::weighted_norm_squared_with_sum`] when the weight sum is already
+    /// available.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `weights.len() != self.len()`.
+    pub fn weighted_norm_squared(&self, weights: &[F]) -> F {
+        assert_eq!(
+            weights.len(),
+            self.len,
+            "weights length must equal column length"
+        );
+        self.weighted_norm_squared_with_sum(weights, weights.iter().copied().sum())
+    }
+
+    /// Weighted squared norm using a precomputed sum of the weights.
+    ///
+    /// `weight_sum` must equal `weights.iter().sum()`. Supplying it keeps this
+    /// operation O(nnz), which is useful for coordinate-wise Hessian
+    /// calculations with a shared weight vector.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `weights.len() != self.len()`.
+    pub fn weighted_norm_squared_with_sum(&self, weights: &[F], weight_sum: F) -> F {
+        assert_eq!(
+            weights.len(),
+            self.len,
+            "weights length must equal column length"
+        );
+        let (stored_squared_deviations, stored_weight) =
+            self.row_indices.iter().zip(self.values).fold(
+                (F::zero(), F::zero()),
+                |(squares, total_weight), (&row, &value)| {
+                    let deviation = value - self.center;
+                    (
+                        squares + weights[row] * deviation * deviation,
+                        total_weight + weights[row],
+                    )
+                },
+            );
+        let implicit_weight = weight_sum - stored_weight;
+        let centered_norm_squared =
+            stored_squared_deviations + implicit_weight * self.center * self.center;
+        centered_norm_squared / (self.scale * self.scale)
+    }
 }
 
 /// A matrix presented with lazy column normalization `X̃ = (X − 1cᵀ)S⁻¹`.

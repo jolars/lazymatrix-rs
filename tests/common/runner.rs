@@ -254,7 +254,14 @@ where
     let centers = vec![0.5, -1.0, 2.0, 3.0];
     let scales = vec![2.0, 4.0, 0.5, 1.5];
     let vector = vec![1.5, -2.0, 0.25, 3.0];
+    let weights = vec![0.5, 2.0, 1.25, 3.0];
     let vector_sum = vector.iter().sum();
+    let weighted_vector_sum = vector
+        .iter()
+        .zip(&weights)
+        .map(|(&value, &weight)| value * weight)
+        .sum();
+    let weight_sum = weights.iter().sum();
 
     for &use_center in &[false, true] {
         for &use_scale in &[false, true] {
@@ -274,6 +281,19 @@ where
                 let expected_sum: f64 = expected.iter().sum();
                 let expected_norm_squared: f64 = expected.iter().map(|value| value * value).sum();
                 let expected_dot = dot(&expected, &vector);
+                let expected_weighted_dot: f64 = expected
+                    .iter()
+                    .zip(&vector)
+                    .zip(&weights)
+                    .map(|((&column_value, &vector_value), &weight)| {
+                        column_value * vector_value * weight
+                    })
+                    .sum();
+                let expected_weighted_norm_squared: f64 = expected
+                    .iter()
+                    .zip(&weights)
+                    .map(|(&column_value, &weight)| weight * column_value * column_value)
+                    .sum();
 
                 approx::assert_abs_diff_eq!(column.sum(), expected_sum, epsilon = EPS);
                 approx::assert_abs_diff_eq!(
@@ -287,6 +307,26 @@ where
                     expected_dot,
                     epsilon = EPS
                 );
+                approx::assert_abs_diff_eq!(
+                    column.weighted_dot(&vector, &weights),
+                    expected_weighted_dot,
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(
+                    column.weighted_dot_with_sum(&vector, &weights, weighted_vector_sum),
+                    expected_weighted_dot,
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(
+                    column.weighted_norm_squared(&weights),
+                    expected_weighted_norm_squared,
+                    epsilon = EPS
+                );
+                approx::assert_abs_diff_eq!(
+                    column.weighted_norm_squared_with_sum(&weights, weight_sum),
+                    expected_weighted_norm_squared,
+                    epsilon = EPS
+                );
             }
         }
     }
@@ -298,6 +338,36 @@ where
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             column.dot_with_sum(short, short.iter().sum())
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            column.weighted_dot(short, &weights)
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            column.weighted_dot(&vector, &weights[..weights.len() - 1])
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            column.weighted_dot_with_sum(short, &weights, 0.0)
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            column.weighted_norm_squared(&weights[..weights.len() - 1])
+        }))
+        .is_err()
+    );
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            column.weighted_norm_squared_with_sum(&weights[..weights.len() - 1], 0.0)
         }))
         .is_err()
     );
@@ -316,11 +386,29 @@ where
     let lazy = LazyMatrix::<_, f64>::from_parts(build(&tm), None, None);
     let column = lazy.column(0);
     let vector = [1.0, 2.0, 3.0];
+    let weights = [0.5, 1.5, 2.0];
+    let weighted_vector_sum = vector
+        .iter()
+        .zip(&weights)
+        .map(|(&value, &weight)| value * weight)
+        .sum();
 
     assert!(column.sum().is_nan());
     assert!(column.norm_squared().is_nan());
     assert!(column.dot(&vector).is_nan());
     assert!(column.dot_with_sum(&vector, vector.iter().sum()).is_nan());
+    assert!(column.weighted_dot(&vector, &weights).is_nan());
+    assert!(
+        column
+            .weighted_dot_with_sum(&vector, &weights, weighted_vector_sum)
+            .is_nan()
+    );
+    assert!(column.weighted_norm_squared(&weights).is_nan());
+    assert!(
+        column
+            .weighted_norm_squared_with_sum(&weights, weights.iter().sum())
+            .is_nan()
+    );
 }
 
 fn empty_and_out_of_bounds_columns<M>(build: &impl Fn(&TestMatrix) -> M)
@@ -345,6 +433,10 @@ where
     assert_eq!(column.norm_squared(), 0.0);
     assert_eq!(column.dot(&[]), 0.0);
     assert_eq!(column.dot_with_sum(&[], 0.0), 0.0);
+    assert_eq!(column.weighted_dot(&[], &[]), 0.0);
+    assert_eq!(column.weighted_dot_with_sum(&[], &[], 0.0), 0.0);
+    assert_eq!(column.weighted_norm_squared(&[]), 0.0);
+    assert_eq!(column.weighted_norm_squared_with_sum(&[], 0.0), 0.0);
 
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| lazy.column(2)));
     assert!(result.is_err());

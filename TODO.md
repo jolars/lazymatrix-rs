@@ -116,16 +116,16 @@ four-way branches should not be ported: optional centers and scales already
 represent the same four states.
 
 - [ ] Add weighted logical-column products.
-  - Provide a weighted dot product for
+  - [x] Provide a weighted dot product for
     `x_tilde_j^T (weights * vector)` without materializing the elementwise
     product.
-  - Provide a weighted squared norm `sum_i weights_i * x_tilde_ij^2` for
+  - [x] Provide a weighted squared norm `sum_i weights_i * x_tilde_ij^2` for
     coordinate-wise Hessian calculations.
-  - Offer variants accepting cached `sum(weights * vector)` and
+  - [x] Offer variants accepting cached `sum(weights * vector)` and
     `sum(weights)` so repeated column operations remain O(nnz_j).
-  - Accept borrowed inputs without forcing copies of dense matrix columns;
+  - [ ] Accept borrowed inputs without forcing copies of dense matrix columns;
     account explicitly for contiguous versus strided vector views.
-  - Test each formula against a dense oracle for all four center/scale
+  - [x] Test each formula against a dense oracle for all four center/scale
     combinations, including implicit and explicitly stored zeros.
 
 - [ ] Make the sparse-plus-offset decomposition of `LazyColumn` easier to use.
