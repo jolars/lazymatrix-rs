@@ -2,10 +2,12 @@
 
 use faer::{Col, ColMut, ColRef, Mat, MatRef};
 
+use crate::backends::support::{
+    MaybeSend, MaybeSync, collect_columns, max_or_nan, min_or_nan, range_or_nan,
+};
 use crate::traits::{
-    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, MaybeSend,
-    MaybeSync, RawColumn, RawColumns, Scalar, VectorView, VectorViewMut, collect_columns,
-    max_or_nan, min_or_nan, range_or_nan,
+    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, RawColumn,
+    RawColumns, Scalar, VectorView, VectorViewMut,
 };
 
 impl<F: Scalar> VectorView<F> for Col<F> {

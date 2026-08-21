@@ -13,92 +13,13 @@ use nalgebra_sparse::ops::Op;
 use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
 use crate::SparseColumnRef;
-use crate::traits::{
-    ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatTransposeVecInto,
-    MatVec, MatVecInto, MatrixShape, MaybeSend, MaybeSync, RawColumns, Scalar, ScaleAssign,
-    ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign, SumEntries, collect_columns,
-    max_or_nan, min_or_nan, range_or_nan, sparse_column_sd,
+use crate::backends::support::{
+    MaybeSend, MaybeSync, collect_columns, max_or_nan, min_or_nan, range_or_nan, sparse_column_sd,
 };
-
-// --- vector traits on DVector<F> ---------------------------------------------
-
-impl<F> DotProduct<F> for DVector<F>
-where
-    F: Scalar + nalgebra::RealField,
-{
-    fn dot(&self, other: &Self) -> F {
-        DVector::dot(self, other)
-    }
-}
-
-impl<F> L2Norm<F> for DVector<F>
-where
-    F: Scalar + nalgebra::RealField,
-{
-    fn norm_l2(&self) -> F {
-        self.norm()
-    }
-}
-
-impl<F> ScaledAddAssign<F> for DVector<F>
-where
-    F: Scalar + nalgebra::RealField,
-{
-    fn scaled_add_assign(&mut self, alpha: F, other: &Self) {
-        self.axpy(alpha, other, F::one());
-    }
-}
-
-impl<F> ScaleAssign<F> for DVector<F>
-where
-    F: Scalar + nalgebra::RealField,
-{
-    fn scale_assign(&mut self, alpha: F) {
-        self.scale_mut(alpha);
-    }
-}
-
-impl<F: Scalar + nalgebra::Scalar> ElemDivAssign<F> for DVector<F> {
-    fn elem_div_assign(&mut self, coeffs: &[F]) {
-        let s = self.as_mut_slice();
-        assert_eq!(s.len(), coeffs.len(), "elem_div_assign: length mismatch");
-        for (a, &c) in s.iter_mut().zip(coeffs) {
-            *a = *a / c;
-        }
-    }
-}
-
-impl<F: Scalar + nalgebra::Scalar> DotSlice<F> for DVector<F> {
-    fn dot_slice(&self, coeffs: &[F]) -> F {
-        let s = self.as_slice();
-        assert_eq!(s.len(), coeffs.len(), "dot_slice: length mismatch");
-        s.iter().zip(coeffs).map(|(&a, &c)| a * c).sum()
-    }
-}
-
-impl<F: Scalar + nalgebra::Scalar> SubScalarAssign<F> for DVector<F> {
-    fn sub_scalar_assign(&mut self, k: F) {
-        for a in self.as_mut_slice() {
-            *a = *a - k;
-        }
-    }
-}
-
-impl<F: Scalar + nalgebra::Scalar> SumEntries<F> for DVector<F> {
-    fn sum_entries(&self) -> F {
-        self.as_slice().iter().copied().sum()
-    }
-}
-
-impl<F: Scalar + nalgebra::Scalar> ScaledSubSlice<F> for DVector<F> {
-    fn scaled_sub_slice(&mut self, k: F, coeffs: &[F]) {
-        let s = self.as_mut_slice();
-        assert_eq!(s.len(), coeffs.len(), "scaled_sub_slice: length mismatch");
-        for (a, &c) in s.iter_mut().zip(coeffs) {
-            *a = *a - k * c;
-        }
-    }
-}
+use crate::traits::{
+    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, RawColumns,
+    Scalar, SparseColumns,
+};
 
 // --- operator traits on CscMatrix<F> -----------------------------------------
 

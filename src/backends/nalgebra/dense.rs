@@ -3,10 +3,12 @@
 use nalgebra::base::storage::{RawStorage, RawStorageMut};
 use nalgebra::{DVector, Dim, Matrix, MatrixView, U1};
 
+use crate::backends::support::{
+    MaybeSend, MaybeSync, collect_columns, max_or_nan, min_or_nan, range_or_nan,
+};
 use crate::traits::{
-    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, MaybeSend,
-    MaybeSync, RawColumn, RawColumns, Scalar, VectorView, VectorViewMut, collect_columns,
-    max_or_nan, min_or_nan, range_or_nan,
+    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, RawColumn,
+    RawColumns, Scalar, VectorView, VectorViewMut,
 };
 
 impl<F, R, S> VectorView<F> for Matrix<F, R, U1, S>
