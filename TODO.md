@@ -50,8 +50,10 @@ state and solver-specific update logic belong in consuming crates.
     orientation-independent.
 
 - [x] Add `LazyMatrix::column` and a borrowed `LazyColumn` view.
-  - Gate the method on `M: SparseColumns`.
-  - Expose row indices, raw stored values, logical length, center, and scale.
+  - Gate generic column access on `M: RawColumns`; retain `M: SparseColumns` for
+    explicit access to contiguous CSC slices.
+  - Expose raw storage, logical length, center, and scale. Sparse views also
+    expose row indices and raw stored values.
   - Use the canonical `center` and `scale` terminology used by `LazyMatrix`;
     inverse scales and affine background values are derived quantities.
   - Represent inactive centering and scaling as effective values `0` and `1`

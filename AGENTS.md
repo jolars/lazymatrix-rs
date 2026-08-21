@@ -1,183 +1,137 @@
-# AGENTS.md
+# Repository Guidelines
 
-Guidance for AI agents working in this repository.
+## Project Structure & Module Organization
 
-## What this crate is
+`src/lib.rs` contains crate documentation, module declarations, and public
+re-exports. The main implementation is divided as follows:
 
-`lazymatrix` presents a column-normalized design matrix
+- `src/normalization.rs` defines `Centering`, `Scaling`, and `Normalization`.
+- `src/matrix.rs` implements `LazyMatrix`, construction, column access, and
+  operator behavior.
+- `src/column.rs` contains logical and sparse borrowed column views.
+- `src/traits/operator.rs` defines matrix shape and allocating or
+  reusable-output matrix-vector products.
+- `src/traits/vectors.rs`, `stats.rs`, and `columns.rs` define vector algebra,
+  sparse-aware statistics, and column capabilities.
+- `src/backends/faer/` and `src/backends/nalgebra/` contain feature-gated dense,
+  sparse, and vector implementations. Shared helpers live in
+  `src/backends/support.rs`.
 
-```
-X̃ = (X − 1cᵀ) S⁻¹      (c = column centers, S = diag(column scales))
-```
+Keep backend-independent logic out of backend implementation directories. With
+no features enabled, the crate provides its traits and `LazyMatrix` with only
+`num-traits`; adding a backend means implementing the existing trait surface for
+a matrix/vector pair. This crate contains no FFI.
 
-as a **linear operator**, without ever materializing `X − 1cᵀ`. Centering a
-sparse matrix turns its structural zeros into nonzeros and destroys sparsity;
-factoring the normalization into the matrix--vector products avoids that. This
-is the Rust backend for the R package `lazymatrix` and for Rust regression/ML
-crates.
+Integration tests are in `tests/`. The backend suites reuse
+`tests/common/runner.rs`, while `tests/cross_backend.rs` checks agreement
+between implementations. Runnable demonstrations belong in `examples/`, and
+Criterion benchmarks belong in `benches/`. See `TODO.md` for planned API work.
 
-The two operations, folded so the backend only ever multiplies the original
-sparse `X`:
+## Architecture & Invariants
 
-```
-X̃ v  = X (S⁻¹ v) − 1 · (cᵀ S⁻¹ v)
-X̃ᵀ u = S⁻¹ (Xᵀ u − c · Σu)
-```
+`LazyMatrix` presents a normalized design matrix as a linear operator:
 
-Centering and scaling are each independently optional.
-
-## Status
-
-The is an early-stage WIP crate. API changes are expected and we are refactoring
-liberally.
-
-## Architecture
-
-- `src/traits.rs` --- the whole trait surface:
-  - `Scalar` --- blanket-impl bundle of `num-traits` bounds (`f32`/`f64`
-    qualify).
-  - `MatVec` / `MatTransposeVec` --- the matrix-free operator pair.
-  - Solver-facing vector algebra (`DotProduct`, `L2Norm`, `ScaledAddAssign`,
-    `ScaleAssign`) plus five normalization primitives (`ElemDivAssign`,
-    `DotSlice`, `SubScalarAssign`, `SumEntries`, `ScaledSubSlice`), with the
-    latter phrased as a backend vector against a coefficient slice `&[F]`.
-  - `ColumnStats` --- column means/sds/minima/ranges/l1/maxabs/l2 (+ centered
-    variants), computed over stored sparse entries without densifying.
-  - `RawColumns` / `Columns` --- associated borrowed raw and logical views for
-    storage-independent column algorithms.
-  - `VectorView` / `VectorViewMut` --- contiguous or strided dense vector
-    access.
-  - `SparseColumns` --- zero-copy access to contiguous CSC column slices.
-  - `Centering` / `Scaling` / `Normalization`.
-- `src/lib.rs` --- `LazyMatrix<M, F = f64>`, generic `LazyColumn<C, F>`, and
-  borrowed `SparseColumnRef<'a, F>` (dependency-free core), constructors, and
-  the two operator impls.
-- `src/faer_dense_backend.rs` / `src/nalgebra_dense_backend.rs` --- dense owned
-  matrices and borrowed/strided views.
-- `src/faer_sparse_backend.rs` --- `[feature = "faer"]`, impls on
-  `SparseColMat<usize, F>` / `Col<F>`.
-- `src/nalgebra_sparse_backend.rs` --- `[feature = "nalgebra"]`, impls on
-  `CscMatrix<F>` / `DVector<F>`.
-
-With no features the crate is just the traits and `LazyMatrix` --- zero deps
-beyond `num-traits`. Backends are added by implementing the trait surface on a
-matrix/vector pair; no FFI lives in this crate.
-
-## Conventions
-
-- Store centers/scales as `Vec<F>`, never the backend vector type --- they only
-  appear in elementwise ops against `&[F]`.
-- Vector-trait impls do scalar arithmetic only, so they bound on `F: Scalar`
-  alone; the heavier backend bounds (`faer_traits::ComplexField`,
-  `nalgebra::Closed*Assign`) belong on the matrix/operator impls.
-- `Scalar` is `num-traits::Float`-based and does **not** provide `AddAssign`.
-  Accumulate with iterator `.sum()` / fold, not `x += y` (clippy's
-  `assign_op_pattern` suggestion would not compile here).
-- Exact zero scales are replaced with 1 (`replace_zero_scales`) so a
-  constant/zero-variance column never divides by zero. Nonfinite statistics
-  retain their IEEE values.
-- When both centering and scaling are on, scales come from the **centered**
-  column. `sd` and `range` are centering-invariant; `l1`/`l2`/`maxabs` use the
-  sparse closed-form `*_centered` variants
-  (`‖x_j − c_j‖₁ = Σ_stored |v − c_j| + (n − nnz_j)·|c_j|` and
-  `‖x_j − c_j‖₂² = Σ_stored (v − c_j)² + (n − nnz_j)·c_j²`).
-
-## Commands
-
-```
-cargo build                              # default: zero-dep core
-cargo build --all-features
-cargo test  --all-features
-cargo clippy --all-features --all-targets -- -D warnings
-cargo fmt --check
+```text
+X_tilde = (X - 1c^T) S^-1
+X_tilde v = X(S^-1 v) - 1(c^T S^-1 v)
+X_tilde^T u = S^-1(X^T u - c sum(u))
 ```
 
-The devenv pre-commit hooks run `clippy` (all features) and `rustfmt`; keep both
-clean. Backend dependency versions are pinned to match the `basin` crate (faer
-0.24, nalgebra 0.34, nalgebra-sparse 0.11).
+Centering and scaling are independently optional. Never materialize the centered
+matrix: doing so turns structural zeros into nonzeros and defeats sparse
+storage. Backends must multiply the original `X` and fold normalization into the
+operator calculation.
 
-## Testing
+Preserve these normalization semantics:
 
-`tests/common/runner.rs` is a backend-generic suite driven per backend
-(`faer_backend.rs`, `nalgebra_backend.rs`, `cross_backend.rs`). The oracle
-materializes `X̃` densely and runs naive products; lazy output must match up to
-FP noise. New backends get a thin test file supplying build/convert closures and
-calling `run_backend_suite`. RNG is seeded (`ChaCha8Rng`) for reproducibility.
+- Replace exact zero scales with one so constant columns do not divide by zero.
+- When centering and scaling are both enabled, compute scales from centered
+  columns. SD and range are centering-invariant; L1, L2, and max-absolute use
+  the sparse closed-form `*_centered` methods, including contributions from
+  implicit zeros. Preserve IEEE nonfinite values.
+- Store centers and scales as `Vec<F>`, not backend-specific vector types.
 
-Shared test modules live in subdirectories and are pulled in with
-`#[path = "common/runner.rs"] mod common;` --- do **not** use `mod.rs` filenames
-anywhere in this repo.
+## Column Access & Capability Boundaries
 
-## Example-driven design
+Keep storage orientation out of the operator and express contiguous borrowing as
+a capability:
 
-Operator *correctness* is covered by the per-backend operator tests (oracle
-parity + the adjoint identity) --- not by running solvers. Real algorithms that
-*consume* the operator live as runnable `examples/` (e.g. `least_squares_gd`) to
-demonstrate usage and pressure-test the API for missing capabilities; the
-solvers themselves stay out of the library and out of the test suite.
-First-order methods (GD, CG, ISTA/FISTA) need only `matvec`/`mat_transpose_vec`.
-When a consuming algorithm reveals a missing *matrix* capability, add it to the
-operator; never add the *solver* to the lib.
+- `MatVec`, `MatTransposeVec`, and `ColumnStats` are orientation-agnostic.
+- Dense backends and storage with natural column views implement `RawColumns`.
+- Only storage that can borrow contiguous CSC slices implements `SparseColumns`.
 
-**Coordinate descent.** The `coordinate_descent` example uses single-column ops
-(`X̃ⱼᵀr = (Xⱼᵀr − cⱼΣr)/sⱼ` and the residual update `r −= Δ·X̃ⱼ`). The dot stays
-O(nnzⱼ) if the solver tracks `Σr` incrementally, but the centered residual
-update carries an O(n) broadcast term (`r[i] += Δcⱼ/sⱼ` for all i). Keeping CD
-at O(nnz) uses the glmnet/sklearn *offset trick*: represent the residual as
-`(stored vector + scalar offset)` so the broadcast is O(1). That choice shapes
-the column-access API: the borrowed column view exposes raw `(row, value)`
-entries plus `cⱼ`/`sⱼ`, provides ordinary logical-column operations, and lets
-the solver use the low-level representation when managing a residual offset.
+`LazyMatrix::column(j)` requires `RawColumns`; `sparse_column(j)` retains the
+stronger `SparseColumns` bound. Do not hide an O(nnz)-per-column gather behind
+`SparseColumns`. An incompatible storage layout should fail at compile time
+rather than silently add a gather.
 
-## Column/row access --- orientation as a capability
+Views borrow rather than copy. `LazyColumn` wraps a backend raw view and the two
+normalization scalars; `LazySparseColumn` also exposes CSC slices and the
+sparse-plus-offset representation. Put logical column operations—dots, weighted
+products, scaled additions, and norms—on the view so callers do not rederive
+normalization formulas. Keep raw slices available for specialized algorithms,
+and document complexity: a centered dot requiring a dense vector sum is O(n +
+nnz), while a cached-sum path is O(nnz). Row views, `SparseRows`, and CSR
+backends are prospective work described in `TODO.md`, not current API.
 
-When borrowed-slice column or row access lands, keep storage orientation out of
-the operator and express it as a capability trait instead:
+## Example-Driven Design
 
-- **Orientation-agnostic, every backend implements regardless of layout:**
-  `MatVec`, `MatTransposeVec`, and `ColumnStats`. `ColumnStats` is a single full
-  pass (walk columns on CSC, or sweep row-major accumulating per-column sums on
-  CSR), so aggregate stats are *not* layout-locked --- only single-element
-  *borrowing* needs a matching orientation. Dense backends also implement
-  `RawColumns`, since indexed columns are naturally available as borrowed
-  views.
-- **Orientation-specific, implemented only where the borrow is contiguous:**
-  `SparseColumns` (`sparse_column(j) -> (&[usize], &[F])`, contiguous in CSC)
-  and a parallel `SparseRows` (`sparse_row(i) -> (&[usize], &[F])`, contiguous
-  in CSR). A backend holding both representations implements both; neither is
-  implemented for the wrong layout.
+Keep solver algorithms and state in `examples/` or downstream crates. Examples
+such as `least_squares_gd` and `coordinate_descent` demonstrate consumers and
+expose missing matrix capabilities, but solvers do not belong in the library or
+its correctness suite. Add a reusable operator or logical-column operation when
+an example reveals a genuine matrix need; do not add residual policies, cached
+sums, update rules, or an entire solver to the crate.
 
-`LazyMatrix::column(j)` is gated on `M: RawColumns`, while
-`sparse_column(j)` retains the stronger `M: SparseColumns` bound and `row(i)`
-will be gated on `M: SparseRows`. A sparse column-sweep solver bounding
-`M: SparseColumns` therefore fails to *compile* against a CSR matrix rather
-than silently doing an O(nnz)-per-column gather --- the same
-capability-as-bound pattern as `new()`'s `M: ColumnStats`.
+## Build, Test, and Development Commands
 
-Views borrow, never copy. `LazyColumn<C, F>` wraps the backend's associated raw
-view and copies the two scalars `cⱼ`/`sⱼ`; `LazySparseColumn<'a, F>` additionally
-exposes the CSC slices and sparse-plus-offset decomposition. `LazyRow<'a, F>`
-will borrow the raw row slices **and** the whole `centers`/`scales` vectors (a
-row touches every column's scalar, so copying them would be wasteful). Adding
-CSR is purely additive --- new backend types (faer `SparseRowMat`, nalgebra
-`CsrMatrix`) implement the agnostic three plus `SparseRows`; no churn to the CSC
-code.
+- `cargo build --locked` builds the dependency-light core.
+- `cargo build --all-features --locked` checks both supported backends.
+- `task test` runs the core, each backend, and the all-feature test matrix.
+- `task ci` runs formatting, Clippy, documentation, and all tests—the local
+  equivalent of GitHub CI.
+- `cargo bench --locked --bench column_sds` runs the column-statistics
+  benchmarks.
+- `cargo run --locked --example coordinate_descent --features faer` runs an
+  example.
 
-Borrowing describes the views' representation, not the limit of their API.
-`LazyColumn` provides correct operations on the logical normalized column, such
-as dots against `VectorView`, weighted products, scaled additions, and column
-norms, so callers do not have to rederive the normalization formulas. Keep raw
-sparse slices and normalization parameters available for specialized
-algorithms. Document complexity explicitly: a centered dot needs the dense
-vector sum and is O(n + nnz), while a cached-sum path remains O(nnz). These
-matrix operations belong on the view; solver state and update policies do not.
+The repository's devenv supplies Rust 1.87, `go-task`, and the configured
+pre-commit hooks.
 
-## Scope (v1)
+## Coding Style & Naming Conventions
 
-In: the operator (`matvec` / `mat_transpose_vec`), `ColumnStats`, generic
-borrowed column access over dense and CSC storage, and explicit CSC
-representation access, over faer and nalgebra. Out (deferred, recoverable
-without rework): Gram `X̃ᵀX̃`, SVD, library-level iterative solvers, row
-normalization, ndarray backends, and any FFI. Solvers belong in consuming
-crates---the runnable examples are consumers, while the library only provides a
-faithful linear operator and storage capabilities.
+Use standard `rustfmt` formatting (four-space indentation) and keep
+`cargo clippy --all-features --all-targets --locked -- -D warnings` clean. Name
+modules, functions, and files in `snake_case`; types and traits use
+`UpperCamelCase`. Document public APIs and explain the reason—not the
+mechanics—in comments. Keep feature-specific dependencies and trait
+implementations behind their matching Cargo feature. `Scalar` does not imply
+`AddAssign`; in generic code, accumulate with iterator sums or folds instead of
+`+=`, and keep heavier backend bounds on matrix and operator implementations.
+
+## Testing Guidelines
+
+Prefer test-driven changes: add a failing regression or behavior test before the
+implementation. Use `#[test]` integration tests with descriptive `snake_case`
+names. `tests/common/runner.rs` is a backend-generic suite driven by thin
+`faer_backend.rs` and `nalgebra_backend.rs` adapters. Extend the generic runner
+when behavior should apply to every backend; use a backend-specific file only
+for adapter or representation details. A new backend should provide construction
+and conversion closures, then call `run_backend_suite`.
+
+The test oracle materializes the normalized matrix densely and compares naive
+products with lazy output up to floating-point noise. Preserve oracle parity and
+the adjoint identity; `cross_backend.rs` separately verifies agreement between
+implementations. Seed random generators with `ChaCha8Rng`, and compare floats
+with `approx`. Import shared modules using
+`#[path = "common/runner.rs"] mod common;`; do not introduce `mod.rs` files. Run
+`task test` during development and `task ci` before submitting.
+
+## Commit & Pull Request Guidelines
+
+Recent history generally follows Conventional Commits, such as `feat:`,
+`refactor:`, `docs:`, and `chore(deps):`. Write short, imperative subjects and
+keep each commit focused. Pull requests should explain the motivation and API or
+performance impact, link relevant issues (for example, `Closes #123`), and list
+the commands run. Include benchmarks when changing hot paths and update examples
+or documentation when public behavior changes.
