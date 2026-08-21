@@ -16,8 +16,8 @@
 use faer::Col;
 use faer::sparse::{SparseColMat, Triplet};
 use lazymatrix::{
-    Centering, DotProduct, LazyMatrix, MatTransposeVec, MatVec, Normalization, ScaleAssign,
-    ScaledAddAssign, Scaling,
+    Centering, DotProduct, LazyMatrix, MatTransposeVecInto, MatVec, MatVecInto, Normalization,
+    ScaleAssign, ScaledAddAssign, Scaling,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -28,18 +28,21 @@ use rand_chacha::ChaCha8Rng;
 /// on `AᵀA`, using only `matvec`/`mat_transpose_vec`.
 fn estimate_lipschitz<Op>(op: &Op, ncols: usize, iters: usize) -> f64
 where
-    Op: MatVec<Col<f64>> + MatTransposeVec<Col<f64>>,
+    Op: MatVecInto<Col<f64>> + MatTransposeVecInto<Col<f64>>,
 {
     let mut v = Col::<f64>::from_fn(ncols, |i| 1.0 + (i as f64) * 0.01);
+    let mut av = Col::<f64>::zeros(op.nrows());
+    let mut atav = Col::<f64>::zeros(ncols);
     let mut lambda = 1.0;
     for _ in 0..iters {
-        let av = op.mat_transpose_vec(&op.matvec(&v)); // AᵀA v
-        lambda = av.norm_l2();
+        op.matvec_into(&v, &mut av);
+        op.mat_transpose_vec_into(&av, &mut atav); // AᵀA v
+        lambda = atav.norm_l2();
         if lambda == 0.0 {
             break;
         }
-        v = av;
-        v.scale_assign(1.0 / lambda);
+        atav.scale_assign(1.0 / lambda);
+        std::mem::swap(&mut v, &mut atav);
     }
     lambda
 }
@@ -54,14 +57,16 @@ fn gradient_descent<Op>(
     tol: f64,
 ) -> (Col<f64>, usize, f64)
 where
-    Op: MatVec<Col<f64>> + MatTransposeVec<Col<f64>>,
+    Op: MatVecInto<Col<f64>> + MatTransposeVecInto<Col<f64>>,
 {
     let mut beta = Col::<f64>::zeros(ncols);
+    let mut resid = Col::<f64>::zeros(y.nrows());
+    let mut grad = Col::<f64>::zeros(ncols);
     let mut last = f64::INFINITY;
     for k in 0..max_iter {
-        let mut resid = op.matvec(&beta);
+        op.matvec_into(&beta, &mut resid);
         resid.scaled_add_assign(-1.0, y); // Aβ − y
-        let grad = op.mat_transpose_vec(&resid); // Aᵀ(Aβ − y)
+        op.mat_transpose_vec_into(&resid, &mut grad); // Aᵀ(Aβ − y)
         let gnorm = grad.norm_l2();
         if gnorm < tol {
             return (beta, k, gnorm);

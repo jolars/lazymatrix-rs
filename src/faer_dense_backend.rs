@@ -3,8 +3,9 @@
 use faer::{Col, ColMut, ColRef, Mat, MatRef};
 
 use crate::traits::{
-    ColumnStats, MatTransposeVec, MatVec, MatrixShape, MaybeSend, MaybeSync, RawColumn, RawColumns,
-    Scalar, VectorView, VectorViewMut, collect_columns, max_or_nan, min_or_nan, range_or_nan,
+    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, MaybeSend,
+    MaybeSync, RawColumn, RawColumns, Scalar, VectorView, VectorViewMut, collect_columns,
+    max_or_nan, min_or_nan, range_or_nan,
 };
 
 impl<F: Scalar> VectorView<F> for Col<F> {
@@ -126,37 +127,69 @@ impl<F: Scalar> RawColumns<F> for MatRef<'_, F> {
     }
 }
 
-fn matvec<F: Scalar>(
+fn matvec_into<F: Scalar>(
     nrows: usize,
     ncols: usize,
     at: impl Fn(usize, usize) -> F,
     x: &Col<F>,
-) -> Col<F> {
-    assert_eq!(ncols, x.nrows(), "matvec: dimension mismatch");
-    Col::from_fn(nrows, |i| (0..ncols).map(|j| at(i, j) * x[j]).sum())
+    out: &mut Col<F>,
+) {
+    assert_eq!(ncols, x.nrows(), "matvec_into: dimension mismatch");
+    assert_eq!(nrows, out.nrows(), "matvec_into: output dimension mismatch");
+    for i in 0..nrows {
+        out[i] = (0..ncols).map(|j| at(i, j) * x[j]).sum();
+    }
 }
 
-fn mat_transpose_vec<F: Scalar>(
+fn mat_transpose_vec_into<F: Scalar>(
     nrows: usize,
     ncols: usize,
     at: impl Fn(usize, usize) -> F,
     x: &Col<F>,
-) -> Col<F> {
-    assert_eq!(nrows, x.nrows(), "mat_transpose_vec: dimension mismatch");
-    Col::from_fn(ncols, |j| (0..nrows).map(|i| at(i, j) * x[i]).sum())
+    out: &mut Col<F>,
+) {
+    assert_eq!(
+        nrows,
+        x.nrows(),
+        "mat_transpose_vec_into: dimension mismatch"
+    );
+    assert_eq!(
+        ncols,
+        out.nrows(),
+        "mat_transpose_vec_into: output dimension mismatch"
+    );
+    for j in 0..ncols {
+        out[j] = (0..nrows).map(|i| at(i, j) * x[i]).sum();
+    }
 }
 
 macro_rules! impl_dense_ops {
     ($matrix:ty) => {
         impl<F: Scalar> MatVec<Col<F>> for $matrix {
             fn matvec(&self, x: &Col<F>) -> Col<F> {
-                matvec(self.nrows(), self.ncols(), |i, j| self[(i, j)], x)
+                let mut out = Col::from_fn(self.nrows(), |_| F::zero());
+                self.matvec_into(x, &mut out);
+                out
             }
         }
 
         impl<F: Scalar> MatTransposeVec<Col<F>> for $matrix {
             fn mat_transpose_vec(&self, x: &Col<F>) -> Col<F> {
-                mat_transpose_vec(self.nrows(), self.ncols(), |i, j| self[(i, j)], x)
+                let mut out = Col::from_fn(self.ncols(), |_| F::zero());
+                self.mat_transpose_vec_into(x, &mut out);
+                out
+            }
+        }
+
+        impl<F: Scalar> MatVecInto<Col<F>> for $matrix {
+            fn matvec_into(&self, x: &Col<F>, out: &mut Col<F>) {
+                matvec_into(self.nrows(), self.ncols(), |i, j| self[(i, j)], x, out)
+            }
+        }
+
+        impl<F: Scalar> MatTransposeVecInto<Col<F>> for $matrix {
+            fn mat_transpose_vec_into(&self, x: &Col<F>, out: &mut Col<F>) {
+                mat_transpose_vec_into(self.nrows(), self.ncols(), |i, j| self[(i, j)], x, out)
             }
         }
     };

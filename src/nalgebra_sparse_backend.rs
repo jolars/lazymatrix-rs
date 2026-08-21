@@ -7,17 +7,17 @@
 //! borrowed column access use the CSC arrays via [`CscMatrix::csc_data`],
 //! treating absent entries as zero.
 
-use nalgebra::{ClosedAddAssign, ClosedMulAssign, DMatrix, DVector};
+use nalgebra::{ClosedAddAssign, ClosedMulAssign, DVector};
 use nalgebra_sparse::CscMatrix;
 use nalgebra_sparse::ops::Op;
 use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
 use crate::SparseColumnRef;
 use crate::traits::{
-    ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec, MatrixShape,
-    MaybeSend, MaybeSync, RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice,
-    SparseColumns, SubScalarAssign, SumEntries, collect_columns, max_or_nan, min_or_nan,
-    range_or_nan, sparse_column_sd,
+    ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatTransposeVecInto,
+    MatVec, MatVecInto, MatrixShape, MaybeSend, MaybeSync, RawColumns, Scalar, ScaleAssign,
+    ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign, SumEntries, collect_columns,
+    max_or_nan, min_or_nan, range_or_nan, sparse_column_sd,
 };
 
 // --- vector traits on DVector<F> ---------------------------------------------
@@ -139,17 +139,9 @@ where
     F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
 {
     fn matvec(&self, x: &DVector<F>) -> DVector<F> {
-        assert_eq!(self.ncols(), x.len(), "matvec: dimension mismatch");
-        let mut y = DMatrix::<F>::zeros(self.nrows(), 1);
-        let x_mat = DMatrix::from_column_slice(x.len(), 1, x.as_slice());
-        spmm_csc_dense(
-            F::zero(),
-            &mut y,
-            F::one(),
-            Op::NoOp(self),
-            Op::NoOp(&x_mat),
-        );
-        DVector::from_column_slice(y.as_slice())
+        let mut out = DVector::zeros(self.nrows());
+        self.matvec_into(x, &mut out);
+        out
     }
 }
 
@@ -158,21 +150,55 @@ where
     F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
 {
     fn mat_transpose_vec(&self, x: &DVector<F>) -> DVector<F> {
+        let mut out = DVector::zeros(self.ncols());
+        self.mat_transpose_vec_into(x, &mut out);
+        out
+    }
+}
+
+impl<F> MatVecInto<DVector<F>> for CscMatrix<F>
+where
+    F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
+{
+    fn matvec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
+        assert_eq!(self.ncols(), x.len(), "matvec_into: dimension mismatch");
+        assert_eq!(
+            self.nrows(),
+            out.len(),
+            "matvec_into: output dimension mismatch"
+        );
+        spmm_csc_dense(
+            F::zero(),
+            out.as_view_mut(),
+            F::one(),
+            Op::NoOp(self),
+            Op::NoOp(x.as_view()),
+        );
+    }
+}
+
+impl<F> MatTransposeVecInto<DVector<F>> for CscMatrix<F>
+where
+    F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
+{
+    fn mat_transpose_vec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
         assert_eq!(
             self.nrows(),
             x.len(),
-            "mat_transpose_vec: dimension mismatch"
+            "mat_transpose_vec_into: dimension mismatch"
         );
-        let mut y = DMatrix::<F>::zeros(self.ncols(), 1);
-        let x_mat = DMatrix::from_column_slice(x.len(), 1, x.as_slice());
+        assert_eq!(
+            self.ncols(),
+            out.len(),
+            "mat_transpose_vec_into: output dimension mismatch"
+        );
         spmm_csc_dense(
             F::zero(),
-            &mut y,
+            out.as_view_mut(),
             F::one(),
             Op::Transpose(self),
-            Op::NoOp(&x_mat),
+            Op::NoOp(x.as_view()),
         );
-        DVector::from_column_slice(y.as_slice())
     }
 }
 

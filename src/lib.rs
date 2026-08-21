@@ -51,9 +51,9 @@ pub mod traits;
 
 pub use traits::{
     Centering, ColumnStats, Columns, DotProduct, DotSlice, ElemDivAssign, L2Norm, LogicalColumn,
-    MatTransposeVec, MatVec, MatrixShape, Normalization, RawColumn, RawColumns, Scalar,
-    ScaleAssign, ScaledAddAssign, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign,
-    SumEntries, VectorView, VectorViewMut,
+    MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, Normalization,
+    RawColumn, RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, Scaling,
+    SparseColumns, SubScalarAssign, SumEntries, VectorView, VectorViewMut,
 };
 
 #[cfg(feature = "faer")]
@@ -659,6 +659,31 @@ where
     }
 }
 
+impl<M, X, Y, F> MatVecInto<X, Y> for LazyMatrix<M, F>
+where
+    F: Scalar,
+    M: MatVecInto<X, Y>,
+    X: Clone + ElemDivAssign<F> + DotSlice<F>,
+    Y: SubScalarAssign<F>,
+{
+    /// `out = X̃ v = X (S⁻¹ v) − 1 · (cᵀ S⁻¹ v)`.
+    fn matvec_into(&self, v: &X, out: &mut Y) {
+        if let Some(s) = &self.scales {
+            let mut w = v.clone();
+            w.elem_div_assign(s);
+            self.data.matvec_into(&w, out);
+            if let Some(c) = &self.centers {
+                out.sub_scalar_assign(w.dot_slice(c));
+            }
+        } else {
+            self.data.matvec_into(v, out);
+            if let Some(c) = &self.centers {
+                out.sub_scalar_assign(v.dot_slice(c));
+            }
+        }
+    }
+}
+
 impl<M, V, F> MatTransposeVec<V> for LazyMatrix<M, F>
 where
     F: Scalar,
@@ -680,5 +705,29 @@ where
             t.elem_div_assign(s); // t = S⁻¹ t
         }
         t
+    }
+}
+
+impl<M, X, Y, F> MatTransposeVecInto<X, Y> for LazyMatrix<M, F>
+where
+    F: Scalar,
+    M: MatTransposeVecInto<X, Y>,
+    X: SumEntries<F>,
+    Y: ScaledSubSlice<F> + ElemDivAssign<F>,
+{
+    /// `out = X̃ᵀ u = S⁻¹ (Xᵀ u − c · Σu)`.
+    fn mat_transpose_vec_into(&self, u: &X, out: &mut Y) {
+        let total = if self.centers.is_some() {
+            u.sum_entries()
+        } else {
+            F::zero()
+        };
+        self.data.mat_transpose_vec_into(u, out);
+        if let Some(c) = &self.centers {
+            out.scaled_sub_slice(total, c);
+        }
+        if let Some(s) = &self.scales {
+            out.elem_div_assign(s);
+        }
     }
 }

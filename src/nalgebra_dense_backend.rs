@@ -4,8 +4,9 @@ use nalgebra::base::storage::{RawStorage, RawStorageMut};
 use nalgebra::{DVector, Dim, Matrix, MatrixView, U1};
 
 use crate::traits::{
-    ColumnStats, MatTransposeVec, MatVec, MatrixShape, MaybeSend, MaybeSync, RawColumn, RawColumns,
-    Scalar, VectorView, VectorViewMut, collect_columns, max_or_nan, min_or_nan, range_or_nan,
+    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, MaybeSend,
+    MaybeSync, RawColumn, RawColumns, Scalar, VectorView, VectorViewMut, collect_columns,
+    max_or_nan, min_or_nan, range_or_nan,
 };
 
 impl<F, R, S> VectorView<F> for Matrix<F, R, U1, S>
@@ -113,10 +114,9 @@ where
     S: RawStorage<F, R, C>,
 {
     fn matvec(&self, x: &DVector<F>) -> DVector<F> {
-        assert_eq!(self.ncols(), x.len(), "matvec: dimension mismatch");
-        DVector::from_fn(self.nrows(), |i, _| {
-            (0..self.ncols()).map(|j| self[(i, j)] * x[j]).sum()
-        })
+        let mut out = DVector::zeros(self.nrows());
+        self.matvec_into(x, &mut out);
+        out
     }
 }
 
@@ -128,14 +128,53 @@ where
     S: RawStorage<F, R, C>,
 {
     fn mat_transpose_vec(&self, x: &DVector<F>) -> DVector<F> {
+        let mut out = DVector::zeros(self.ncols());
+        self.mat_transpose_vec_into(x, &mut out);
+        out
+    }
+}
+
+impl<F, R, C, S> MatVecInto<DVector<F>> for Matrix<F, R, C, S>
+where
+    F: Scalar + nalgebra::Scalar,
+    R: Dim,
+    C: Dim,
+    S: RawStorage<F, R, C>,
+{
+    fn matvec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
+        assert_eq!(self.ncols(), x.len(), "matvec_into: dimension mismatch");
+        assert_eq!(
+            self.nrows(),
+            out.len(),
+            "matvec_into: output dimension mismatch"
+        );
+        for i in 0..self.nrows() {
+            out[i] = (0..self.ncols()).map(|j| self[(i, j)] * x[j]).sum();
+        }
+    }
+}
+
+impl<F, R, C, S> MatTransposeVecInto<DVector<F>> for Matrix<F, R, C, S>
+where
+    F: Scalar + nalgebra::Scalar,
+    R: Dim,
+    C: Dim,
+    S: RawStorage<F, R, C>,
+{
+    fn mat_transpose_vec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
         assert_eq!(
             self.nrows(),
             x.len(),
-            "mat_transpose_vec: dimension mismatch"
+            "mat_transpose_vec_into: dimension mismatch"
         );
-        DVector::from_fn(self.ncols(), |j, _| {
-            (0..self.nrows()).map(|i| self[(i, j)] * x[i]).sum()
-        })
+        assert_eq!(
+            self.ncols(),
+            out.len(),
+            "mat_transpose_vec_into: output dimension mismatch"
+        );
+        for j in 0..self.ncols() {
+            out[j] = (0..self.nrows()).map(|i| self[(i, j)] * x[i]).sum();
+        }
     }
 }
 

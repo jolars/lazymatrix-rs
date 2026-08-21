@@ -7,8 +7,9 @@
 use lazymatrix::VectorView;
 use lazymatrix::{
     Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, LazyMatrix,
-    LazySparseColumn, MatTransposeVec, MatVec, MatrixShape, Normalization, RawColumns, ScaleAssign,
-    ScaledAddAssign, ScaledSubSlice, Scaling, SparseColumns, SubScalarAssign, SumEntries,
+    LazySparseColumn, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape,
+    Normalization, RawColumns, ScaleAssign, ScaledAddAssign, ScaledSubSlice, Scaling,
+    SparseColumns, SubScalarAssign, SumEntries,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -118,7 +119,7 @@ pub fn run_backend_suite<M, V>(
     to_v: impl Fn(&[f64]) -> V,
     from_v: impl Fn(&V) -> Vec<f64>,
 ) where
-    M: MatVec<V> + MatTransposeVec<V> + ColumnStats<f64>,
+    M: MatVec<V> + MatVecInto<V> + MatTransposeVec<V> + MatTransposeVecInto<V> + ColumnStats<f64>,
     V: Clone
         + DotProduct<f64>
         + L2Norm<f64>
@@ -132,6 +133,7 @@ pub fn run_backend_suite<M, V>(
 {
     vector_algebra(&to_v, &from_v);
     oracle_parity(&build, &to_v, &from_v);
+    reusable_output_parity(&build, &to_v, &from_v);
     adjoint_identity(&build, &to_v, &from_v);
     from_parts_passthrough(&build, &to_v, &from_v);
     new_matches_oracle(&build, &to_v, &from_v);
@@ -142,6 +144,104 @@ pub fn run_backend_suite<M, V>(
     zero_scale_guard(&build, &to_v, &from_v);
     empty_and_nonfinite_stats(&build);
     shape_is_inferred(&build);
+}
+
+fn reusable_output_parity<M, V>(
+    build: &impl Fn(&TestMatrix) -> M,
+    to_v: &impl Fn(&[f64]) -> V,
+    from_v: &impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVecInto<V> + MatTransposeVecInto<V>,
+    V: Clone
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    let tm = random_matrix(101, 11, 7, 0.35);
+    let centers = random_vec(102, tm.ncols);
+    let scales: Vec<f64> = random_vec(103, tm.ncols)
+        .iter()
+        .map(|x| x.abs() + 0.5)
+        .collect();
+    let v = to_v(&random_vec(104, tm.ncols));
+    let u = to_v(&random_vec(105, tm.nrows));
+
+    for &use_c in &[false, true] {
+        for &use_s in &[false, true] {
+            let c = use_c.then(|| centers.clone());
+            let s = use_s.then(|| scales.clone());
+            let lazy = LazyMatrix::from_parts(build(&tm), c.clone(), s.clone());
+            let xtilde = materialize(&tm.dense, c.as_deref(), s.as_deref());
+
+            let mut y = to_v(&vec![123.0; tm.nrows]);
+            lazy.matvec_into(&v, &mut y);
+            assert_close(&from_v(&y), &dense_matvec(&xtilde, &from_v(&v)), EPS);
+
+            let mut z = to_v(&vec![123.0; tm.ncols]);
+            lazy.mat_transpose_vec_into(&u, &mut z);
+            assert_close(&from_v(&z), &dense_tmatvec(&xtilde, &from_v(&u)), EPS);
+        }
+    }
+
+    let matrix = build(&tm);
+    let short_v = to_v(&vec![0.0; tm.ncols - 1]);
+    let mut y = to_v(&vec![0.0; tm.nrows]);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            matrix.matvec_into(&short_v, &mut y);
+        }))
+        .is_err()
+    );
+
+    let mut short_y = to_v(&vec![0.0; tm.nrows - 1]);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            matrix.matvec_into(&v, &mut short_y);
+        }))
+        .is_err()
+    );
+
+    let short_u = to_v(&vec![0.0; tm.nrows - 1]);
+    let mut z = to_v(&vec![0.0; tm.ncols]);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            matrix.mat_transpose_vec_into(&short_u, &mut z);
+        }))
+        .is_err()
+    );
+
+    let mut short_z = to_v(&vec![0.0; tm.ncols - 1]);
+    assert!(
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            matrix.mat_transpose_vec_into(&u, &mut short_z);
+        }))
+        .is_err()
+    );
+
+    let no_rows = TestMatrix {
+        nrows: 0,
+        ncols: 3,
+        dense: Vec::new(),
+        triplets: Vec::new(),
+    };
+    let no_rows = LazyMatrix::<_, f64>::from_parts(build(&no_rows), None, None);
+    let mut empty = to_v(&[]);
+    no_rows.matvec_into(&to_v(&[1.0, 2.0, 3.0]), &mut empty);
+    assert!(from_v(&empty).is_empty());
+    let mut zeros = to_v(&[123.0, 123.0, 123.0]);
+    no_rows.mat_transpose_vec_into(&to_v(&[]), &mut zeros);
+    assert_eq!(from_v(&zeros), vec![0.0; 3]);
+
+    let no_columns = random_matrix(106, 3, 0, 0.5);
+    let no_columns = LazyMatrix::<_, f64>::from_parts(build(&no_columns), None, None);
+    let mut zeros = to_v(&[123.0, 123.0, 123.0]);
+    no_columns.matvec_into(&to_v(&[]), &mut zeros);
+    assert_eq!(from_v(&zeros), vec![0.0; 3]);
+    let mut empty = to_v(&[]);
+    no_columns.mat_transpose_vec_into(&to_v(&[1.0, 2.0, 3.0]), &mut empty);
+    assert!(from_v(&empty).is_empty());
 }
 
 fn vector_algebra<V>(to_v: &impl Fn(&[f64]) -> V, from_v: &impl Fn(&V) -> Vec<f64>)

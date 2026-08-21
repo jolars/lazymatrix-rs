@@ -13,10 +13,10 @@ use faer::{Accum, Col, Par};
 
 use crate::SparseColumnRef;
 use crate::traits::{
-    ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatVec, MatrixShape,
-    MaybeSend, MaybeSync, RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice,
-    SparseColumns, SubScalarAssign, SumEntries, collect_columns, max_or_nan, min_or_nan,
-    range_or_nan, sparse_column_sd,
+    ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, MatTransposeVec, MatTransposeVecInto,
+    MatVec, MatVecInto, MatrixShape, MaybeSend, MaybeSync, RawColumns, Scalar, ScaleAssign,
+    ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign, SumEntries, collect_columns,
+    max_or_nan, min_or_nan, range_or_nan, sparse_column_sd,
 };
 
 #[cfg(feature = "parallel")]
@@ -153,16 +153,8 @@ where
     F: Scalar + faer_traits::ComplexField,
 {
     fn matvec(&self, x: &Col<F>) -> Col<F> {
-        assert_eq!(self.ncols(), x.nrows(), "matvec: dimension mismatch");
         let mut y = Col::<F>::zeros(self.nrows());
-        sparse_dense_matmul(
-            y.as_mat_mut(),
-            Accum::Replace,
-            self.as_ref(),
-            x.as_mat(),
-            F::one(),
-            parallelism(),
-        );
+        self.matvec_into(x, &mut y);
         y
     }
 }
@@ -172,21 +164,57 @@ where
     F: Scalar + faer_traits::ComplexField,
 {
     fn mat_transpose_vec(&self, x: &Col<F>) -> Col<F> {
+        let mut y = Col::<F>::zeros(self.ncols());
+        self.mat_transpose_vec_into(x, &mut y);
+        y
+    }
+}
+
+impl<F> MatVecInto<Col<F>> for SparseColMat<usize, F>
+where
+    F: Scalar + faer_traits::ComplexField,
+{
+    fn matvec_into(&self, x: &Col<F>, out: &mut Col<F>) {
+        assert_eq!(self.ncols(), x.nrows(), "matvec_into: dimension mismatch");
+        assert_eq!(
+            self.nrows(),
+            out.nrows(),
+            "matvec_into: output dimension mismatch"
+        );
+        sparse_dense_matmul(
+            out.as_mat_mut(),
+            Accum::Replace,
+            self.as_ref(),
+            x.as_mat(),
+            F::one(),
+            parallelism(),
+        );
+    }
+}
+
+impl<F> MatTransposeVecInto<Col<F>> for SparseColMat<usize, F>
+where
+    F: Scalar + faer_traits::ComplexField,
+{
+    fn mat_transpose_vec_into(&self, x: &Col<F>, out: &mut Col<F>) {
         assert_eq!(
             self.nrows(),
             x.nrows(),
-            "mat_transpose_vec: dimension mismatch"
+            "mat_transpose_vec_into: dimension mismatch"
         );
-        let mut y = Col::<F>::zeros(self.ncols());
+        assert_eq!(
+            self.ncols(),
+            out.nrows(),
+            "mat_transpose_vec_into: output dimension mismatch"
+        );
         sparse_dense_matmul(
-            y.as_mat_mut(),
+            out.as_mat_mut(),
             Accum::Replace,
             self.as_ref().transpose(),
             x.as_mat(),
             F::one(),
             parallelism(),
         );
-        y
     }
 }
 

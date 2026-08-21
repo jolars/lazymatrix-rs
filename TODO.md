@@ -90,11 +90,25 @@ state and solver-specific update logic belong in consuming crates.
     cross-validation, and prediction do not need to consume the design matrix.
 
 - [ ] Evaluate reusable-output operator methods before stabilizing the traits.
-  - Prototype `matvec_into` and `mat_transpose_vec_into` as additive
-    capabilities or as the primitive operator interface.
+  - [x] Add `matvec_into` and `mat_transpose_vec_into` capabilities, with the
+    backend implementations as the primitive path for allocating products.
+  - [x] Allow input and output vector types to differ where backend APIs permit
+    it, so borrowed or strided inputs can write into owned backend vectors.
+  - [x] Specify dimension-checking and overwrite semantics, and implement
+    backend-specific fast paths.
   - Measure allocation costs in an iterative consumer before designing a
     reusable normalization workspace.
   - Keep allocating convenience methods if they materially improve ergonomics.
+
+- [ ] Prototype fused scaled operator application.
+  - Add forward and transpose capabilities for `y = alpha * A * x + beta * y`.
+  - Express overwrite, accumulation, and subtraction through the same primitive
+    rather than allocating intermediate vectors.
+  - Determine how callers can reuse the `S^-1 x` workspace needed by a scaled
+    `LazyMatrix` without exposing backend-specific scratch types in the core
+    traits.
+  - Test `alpha` and `beta` at zero, one, negative values, and nonfinite values,
+    along with empty and rectangular operators.
 
 - [ ] Avoid cloning the forward input when scaling is inactive.
   - Preserve the direct backend path for raw and center-only products.
@@ -107,6 +121,28 @@ state and solver-specific update logic belong in consuming crates.
   - Fold normalization into the batched products using the same identities as
     `MatVec` and `MatTransposeVec`.
   - Keep the capability independent of any response, loss, or solver type.
+  - Consider reusable-output and fused `alpha`/`beta` variants only after the
+    vector forms establish their ownership and workspace contracts.
+
+## Operator algebra
+
+- [ ] Evaluate a borrowed transpose operator view with a concrete consumer.
+  - A transpose view should swap `MatVec` and `MatTransposeVec` without copying
+    or changing the normalization represented by the original operator.
+  - Do not imply that transposed sparse storage has acquired the opposite
+    orientation-specific borrowing capability.
+
+- [ ] Evaluate lightweight scaled, sum, and composition operator wrappers.
+  - Candidate forms are `Scaled<A>`, `Sum<A, B>`, and `Composition<A, B>`;
+    require compatible dimensions and implement products without materializing
+    their operands.
+  - Prefer named constructors or methods over `Add` and `Mul` until ownership,
+    borrowing, scalar-zero behavior, and error messages are settled.
+  - Add a wrapper only when a consumer benefits beyond spelling two existing
+    operator calls explicitly.
+  - Keep broadcast scalar/vector addition out of generic arithmetic: its row
+    versus column semantics are ambiguous, and the general case needs a
+    low-rank expression rather than altered normalization metadata.
 
 ## SLOPE rewrite support
 
@@ -171,6 +207,18 @@ represent the same four states.
   - Do not encode flattened feature-response indices or SLOPE working-set
     policy in the matrix API.
 
+- [ ] Benchmark logical column-pair products before adding a Gram-entry API.
+  - Prototype `X_tilde_j^T X_tilde_k` and
+    `X_tilde_j^T diag(weights) X_tilde_k` in a consuming coordinate or block
+    method.
+  - For CSC inputs, merge stored row indices and account for the centered
+    background analytically rather than materializing either logical column.
+  - Define the capability at matrix level if accepting two backend-specific
+    associated column-view types makes a reusable `LogicalColumn` method
+    awkward.
+  - Document backend-specific complexity; do not promise sparse intersection
+    costs for dense storage or for an incompatible sparse orientation.
+
 - [ ] Pressure-test signed combinations of normalized columns in the SLOPE
       consumer.
   - Build cluster directions from `LazyColumn` views into a consumer-owned
@@ -206,6 +254,22 @@ represent the same four states.
 - [ ] Replace the ignored crate-level example with a small compiling doctest
       once the shape-aware constructors settle.
 
+## Surface ownership decisions
+
+- [ ] Revisit whole-operator logical reductions only with a concrete consumer.
+  - Column sums and squared norms are already available through `LogicalColumn`;
+    do not duplicate them as matrix-wide allocation-returning methods merely
+    for symmetry.
+  - Spectral norms, bilinear forms such as `u^T A v`, and quadratic forms such
+    as `A^T A v` remain compositions of existing primitives unless fusion is
+    shown to matter.
+
+- [ ] Keep general vector algebra outside the normalization trait surface.
+  - Hadamard products, arbitrary maps and reductions, vector construction, and
+    proximal operations belong to backends or solver-facing crates.
+  - Promote a vector primitive here only when it is required to implement a
+    matrix capability across multiple backends.
+
 ## Explicit non-goals
 
 - Coordinate descent, SGD, residual offsets, coefficient offsets, sampling,
@@ -216,6 +280,9 @@ represent the same four states.
   solver-specific state or update operations.
 - Arbitrary affine-expression machinery is deferred until more transformations
   than column centering and scaling require it.
+- Determinants, inverses, factorizations, direct solves, mutable entrywise
+  matrix arithmetic, rank-one updates, and general matrix Hadamard products are
+  not linear-operator capabilities and remain out of scope.
 - Intercept fitting, coefficient rescaling, working and strong sets, screening,
   KKT policy, SLOPE clusters, and cluster merging or splitting remain in the
   consuming model crate.
