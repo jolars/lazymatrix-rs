@@ -23,6 +23,7 @@ faer = ["dep:faer", "dep:faer-traits"]
 
 [dev-dependencies]
 approx = "0.5"
+criterion = "0.8.2"
 rand = { version = "0.10", default-features = false, features = [
     "std",
     "std_rng",
@@ -32,3 +33,7 @@ rand_chacha = "0.10"
 [[example]]
 name = "least_squares_gd"
 required-features = ["faer"]
+
+[[bench]]
+name = "column_sds"
+harness = false

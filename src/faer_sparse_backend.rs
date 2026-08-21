@@ -12,7 +12,7 @@ use faer::{Accum, Col, Par};
 
 use crate::traits::{
     ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SubScalarAssign, SumEntries,
+    ScaledSubSlice, SubScalarAssign, SumEntries, sparse_column_sd,
 };
 
 // --- vector traits on Col<F> (scalar arithmetic only: bound F: Scalar) -------
@@ -138,22 +138,13 @@ where
     }
 
     fn col_sds(&self) -> Vec<F> {
-        let n = F::from_usize(self.nrows()).unwrap();
+        let nrows = self.nrows();
         let col_ptr = self.col_ptr();
         let vals = self.val();
         (0..self.ncols())
             .map(|j| {
                 let (start, end) = (col_ptr[j], col_ptr[j + 1]);
-                let col = &vals[start..end];
-                let sum: F = col.iter().copied().sum();
-                let sum_sq: F = col.iter().map(|&v| v * v).sum();
-                let mean = sum / n;
-                let var = sum_sq / n - mean * mean;
-                if var > F::zero() {
-                    var.sqrt()
-                } else {
-                    F::zero()
-                }
+                sparse_column_sd(&vals[start..end], nrows)
             })
             .collect()
     }

@@ -13,7 +13,7 @@ use nalgebra_sparse::ops::serial::spmm_csc_dense;
 
 use crate::traits::{
     ColumnStats, DotSlice, ElemDivAssign, MatTransposeVec, MatVec, MatrixShape, Scalar,
-    ScaledSubSlice, SubScalarAssign, SumEntries,
+    ScaledSubSlice, SubScalarAssign, SumEntries, sparse_column_sd,
 };
 
 // --- vector traits on DVector<F> ---------------------------------------------
@@ -133,21 +133,12 @@ where
     }
 
     fn col_sds(&self) -> Vec<F> {
-        let n = F::from_usize(self.nrows()).unwrap();
+        let nrows = self.nrows();
         let (col_offsets, _row_idx, values) = self.csc_data();
         (0..self.ncols())
             .map(|j| {
                 let (start, end) = (col_offsets[j], col_offsets[j + 1]);
-                let col = &values[start..end];
-                let sum: F = col.iter().copied().sum();
-                let sum_sq: F = col.iter().map(|&v| v * v).sum();
-                let mean = sum / n;
-                let var = sum_sq / n - mean * mean;
-                if var > F::zero() {
-                    var.sqrt()
-                } else {
-                    F::zero()
-                }
+                sparse_column_sd(&values[start..end], nrows)
             })
             .collect()
     }

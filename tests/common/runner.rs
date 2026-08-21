@@ -128,8 +128,29 @@ pub fn run_backend_suite<M, V>(
     from_parts_passthrough(&build, &to_v, &from_v);
     new_matches_oracle(&build, &to_v, &from_v);
     column_stats_fixed(&build);
+    column_sds_large_offset(&build);
     zero_scale_guard(&build, &to_v, &from_v);
     shape_is_inferred(&build);
+}
+
+/// Standard deviations retain small variation around a large offset.
+fn column_sds_large_offset<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: ColumnStats<f64>,
+{
+    let offset = 1.0e12;
+    let tm = TestMatrix {
+        nrows: 3,
+        ncols: 1,
+        dense: vec![vec![offset + 1.0], vec![offset + 2.0], vec![offset + 3.0]],
+        triplets: vec![
+            (0, 0, offset + 1.0),
+            (1, 0, offset + 2.0),
+            (2, 0, offset + 3.0),
+        ],
+    };
+
+    assert_close(&build(&tm).col_sds(), &[(2.0_f64 / 3.0).sqrt()], EPS);
 }
 
 /// The wrapper obtains its dimensions from the backend matrix.

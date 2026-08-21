@@ -15,7 +15,7 @@ state and solver-specific update logic belong in consuming crates.
   - Test rectangular and zero-column matrices; caller/backend dimension
     disagreement is eliminated by construction.
 
-- [ ] Make standard-deviation calculations numerically stable.
+- [x] Make standard-deviation calculations numerically stable.
   - Replace `E[x^2] - E[x]^2` with a stable two-pass or combined-variance
     calculation that accounts for implicit sparse zeros.
   - Add a regression test using a large offset and small variation, such as

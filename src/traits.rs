@@ -35,6 +35,23 @@ impl<F> Scalar for F where
 {
 }
 
+/// Computes a population standard deviation from stored values and implicit zeros.
+#[cfg(any(feature = "faer", feature = "nalgebra"))]
+pub(crate) fn sparse_column_sd<F: Scalar>(values: &[F], nrows: usize) -> F {
+    let n = F::from_usize(nrows).unwrap();
+    let mean = values.iter().copied().sum::<F>() / n;
+    let stored_squared_deviations = values
+        .iter()
+        .map(|&value| {
+            let deviation = value - mean;
+            deviation * deviation
+        })
+        .sum::<F>();
+    let implicit_count = F::from_usize(nrows - values.len()).unwrap();
+    let variance = (stored_squared_deviations + implicit_count * mean * mean) / n;
+    variance.sqrt()
+}
+
 /// Dimensions of a matrix or linear operator.
 pub trait MatrixShape {
     fn nrows(&self) -> usize;
@@ -104,10 +121,10 @@ pub trait ColumnStats<F: Scalar> {
     /// Column means `c_j = (Σ_i x_ij) / n`.
     fn col_means(&self) -> Vec<F>;
 
-    /// Column population standard deviations `√((Σ_i x_ij² )/n − c_j²)`.
+    /// Column population standard deviations `√(Σ_i (x_ij − c_j)²/n)`.
     ///
     /// Centering-invariant, so this is also the standard deviation of the
-    /// centered column.
+    /// centered column. Implementations use a stable two-pass calculation.
     fn col_sds(&self) -> Vec<F>;
 
     /// Column max-absolute values `max_i |x_ij|` of the un-centered column.
