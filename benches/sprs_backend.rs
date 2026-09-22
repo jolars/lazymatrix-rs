@@ -24,19 +24,23 @@ fn benchmark_sprs(c: &mut Criterion) {
         for (layout, matrix) in [("csc", &csc), ("csr", &csr)] {
             let case = format!("{layout}_{nrows}x{ncols}");
             group.bench_with_input(BenchmarkId::new("col_sds", &case), matrix, |b, matrix| {
-                b.iter(|| black_box(matrix).col_sds());
+                b.iter(|| black_box(matrix).col_sds().unwrap());
             });
 
-            let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd));
+            let lazy =
+                LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd)).unwrap();
             let v = vec![1.0; ncols];
             let u = vec![1.0; nrows];
             let mut y = vec![0.0; nrows];
             let mut z = vec![0.0; ncols];
             group.bench_function(BenchmarkId::new("matvec_into", &case), |b| {
-                b.iter(|| lazy.matvec_into(black_box(&v), black_box(&mut y)));
+                b.iter(|| lazy.matvec_into(black_box(&v), black_box(&mut y)).unwrap());
             });
             group.bench_function(BenchmarkId::new("transpose_into", &case), |b| {
-                b.iter(|| lazy.mat_transpose_vec_into(black_box(&u), black_box(&mut z)));
+                b.iter(|| {
+                    lazy.mat_transpose_vec_into(black_box(&u), black_box(&mut z))
+                        .unwrap()
+                });
             });
         }
     }

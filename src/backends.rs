@@ -11,3 +11,6 @@ mod ndarray;
 
 #[cfg(feature = "sprs_all")]
 pub(crate) mod sprs;
+
+#[cfg(feature = "zarrs_all")]
+pub(crate) mod zarrs;

@@ -115,10 +115,10 @@ where
     C: Dim,
     S: RawStorage<F, R, C>,
 {
-    fn matvec(&self, x: &DVector<F>) -> DVector<F> {
+    fn matvec(&self, x: &DVector<F>) -> Result<DVector<F>, Self::Error> {
         let mut out = DVector::zeros(self.nrows());
-        self.matvec_into(x, &mut out);
-        out
+        self.matvec_into(x, &mut out)?;
+        Ok(out)
     }
 }
 
@@ -129,10 +129,10 @@ where
     C: Dim,
     S: RawStorage<F, R, C>,
 {
-    fn mat_transpose_vec(&self, x: &DVector<F>) -> DVector<F> {
+    fn mat_transpose_vec(&self, x: &DVector<F>) -> Result<DVector<F>, Self::Error> {
         let mut out = DVector::zeros(self.ncols());
-        self.mat_transpose_vec_into(x, &mut out);
-        out
+        self.mat_transpose_vec_into(x, &mut out)?;
+        Ok(out)
     }
 }
 
@@ -143,7 +143,7 @@ where
     C: Dim,
     S: RawStorage<F, R, C>,
 {
-    fn matvec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
+    fn matvec_into(&self, x: &DVector<F>, out: &mut DVector<F>) -> Result<(), Self::Error> {
         assert_eq!(self.ncols(), x.len(), "matvec_into: dimension mismatch");
         assert_eq!(
             self.nrows(),
@@ -153,6 +153,7 @@ where
         for i in 0..self.nrows() {
             out[i] = (0..self.ncols()).map(|j| self[(i, j)] * x[j]).sum();
         }
+        Ok(())
     }
 }
 
@@ -163,7 +164,11 @@ where
     C: Dim,
     S: RawStorage<F, R, C>,
 {
-    fn mat_transpose_vec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
+    fn mat_transpose_vec_into(
+        &self,
+        x: &DVector<F>,
+        out: &mut DVector<F>,
+    ) -> Result<(), Self::Error> {
         assert_eq!(
             self.nrows(),
             x.len(),
@@ -177,6 +182,7 @@ where
         for j in 0..self.ncols() {
             out[j] = (0..self.nrows()).map(|i| self[(i, j)] * x[i]).sum();
         }
+        Ok(())
     }
 }
 
@@ -187,17 +193,17 @@ where
     C: Dim,
     S: RawStorage<F, R, C> + MaybeSync,
 {
-    fn col_means(&self) -> Vec<F> {
+    fn col_means(&self) -> Result<Vec<F>, Self::Error> {
         let n = F::from_usize(self.nrows()).unwrap();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             (0..self.nrows()).map(|i| self[(i, j)]).sum::<F>() / n
-        })
+        }))
     }
 
-    fn col_sds(&self) -> Vec<F> {
-        let centers = self.col_means();
+    fn col_sds(&self) -> Result<Vec<F>, Self::Error> {
+        let centers = self.col_means()?;
         let n = F::from_usize(self.nrows()).unwrap();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             ((0..self.nrows())
                 .map(|i| {
                     let deviation = self[(i, j)] - centers[j];
@@ -206,49 +212,49 @@ where
                 .sum::<F>()
                 / n)
                 .sqrt()
-        })
+        }))
     }
 
-    fn col_mins(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_mins(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             min_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
-        })
+        }))
     }
 
-    fn col_ranges(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_ranges(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             range_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
-        })
+        }))
     }
 
-    fn col_maxabs(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_maxabs(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             max_or_nan((0..self.nrows()).map(|i| self[(i, j)].abs()))
-        })
+        }))
     }
 
-    fn col_l1(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_l1(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             (0..self.nrows()).map(|i| self[(i, j)].abs()).sum()
-        })
+        }))
     }
 
-    fn col_l2(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_l2(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             (0..self.nrows())
                 .map(|i| self[(i, j)] * self[(i, j)])
                 .sum::<F>()
                 .sqrt()
-        })
+        }))
     }
 
-    fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l2_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
             "col_l2_centered: length mismatch"
         );
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             (0..self.nrows())
                 .map(|i| {
                     let value = self[(i, j)] - centers[j];
@@ -256,30 +262,39 @@ where
                 })
                 .sum::<F>()
                 .sqrt()
-        })
+        }))
     }
 
-    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l1_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
             "col_l1_centered: length mismatch"
         );
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             (0..self.nrows())
                 .map(|i| (self[(i, j)] - centers[j]).abs())
                 .sum()
-        })
+        }))
     }
 
-    fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_maxabs_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
             "col_maxabs_centered: length mismatch"
         );
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             max_or_nan((0..self.nrows()).map(|i| (self[(i, j)] - centers[j]).abs()))
-        })
+        }))
     }
+}
+
+impl<F, R, C, S> crate::MatrixErrorType for Matrix<F, R, C, S>
+where
+    R: Dim,
+    C: Dim,
+    S: RawStorage<F, R, C>,
+{
+    type Error = std::convert::Infallible;
 }

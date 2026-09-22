@@ -32,10 +32,10 @@ fn sprs_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> 
     for &(row, col, value) in &tm.triplets {
         triplets.add_triplet(row, col, value);
     }
-    let lazy = LazyMatrix::new(triplets.to_csc::<usize>(), spec);
+    let lazy = LazyMatrix::new(triplets.to_csc::<usize>(), spec).unwrap();
     (
-        lazy.matvec(&v.to_vec()),
-        lazy.mat_transpose_vec(&u.to_vec()),
+        lazy.matvec(&v.to_vec()).unwrap(),
+        lazy.mat_transpose_vec(&u.to_vec()).unwrap(),
     )
 }
 
@@ -50,9 +50,11 @@ fn faer_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> 
         .map(|&(r, c, v)| Triplet::new(r, c, v))
         .collect();
     let matrix = SparseColMat::try_new_from_triplets(tm.nrows, tm.ncols, &t).unwrap();
-    let lazy = LazyMatrix::new(matrix, spec);
-    let y = lazy.matvec(&Col::from_fn(v.len(), |i| v[i]));
-    let z = lazy.mat_transpose_vec(&Col::from_fn(u.len(), |i| u[i]));
+    let lazy = LazyMatrix::new(matrix, spec).unwrap();
+    let y = lazy.matvec(&Col::from_fn(v.len(), |i| v[i])).unwrap();
+    let z = lazy
+        .mat_transpose_vec(&Col::from_fn(u.len(), |i| u[i]))
+        .unwrap();
     (
         (0..y.nrows()).map(|i| y[i]).collect(),
         (0..z.nrows()).map(|i| z[i]).collect(),
@@ -68,12 +70,14 @@ fn nalgebra_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64])
     for &(r, c, v) in &tm.triplets {
         coo.push(r, c, v);
     }
-    let lazy = LazyMatrix::new(CscMatrix::from(&coo), spec);
+    let lazy = LazyMatrix::new(CscMatrix::from(&coo), spec).unwrap();
     (
         lazy.matvec(&DVector::from_column_slice(v))
+            .unwrap()
             .as_slice()
             .to_vec(),
         lazy.mat_transpose_vec(&DVector::from_column_slice(u))
+            .unwrap()
             .as_slice()
             .to_vec(),
     )
@@ -84,10 +88,11 @@ fn ndarray_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) 
     use ndarray::{Array1, Array2};
 
     let matrix = Array2::from_shape_fn((tm.nrows, tm.ncols), |(i, j)| tm.dense[i][j]);
-    let lazy = LazyMatrix::new(matrix, spec);
+    let lazy = LazyMatrix::new(matrix, spec).unwrap();
     (
-        lazy.matvec(&Array1::from_vec(v.to_vec())).to_vec(),
+        lazy.matvec(&Array1::from_vec(v.to_vec())).unwrap().to_vec(),
         lazy.mat_transpose_vec(&Array1::from_vec(u.to_vec()))
+            .unwrap()
             .to_vec(),
     )
 }

@@ -74,10 +74,10 @@ impl<F> MatVec<DVector<F>> for CscMatrix<F>
 where
     F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
 {
-    fn matvec(&self, x: &DVector<F>) -> DVector<F> {
+    fn matvec(&self, x: &DVector<F>) -> Result<DVector<F>, Self::Error> {
         let mut out = DVector::zeros(self.nrows());
-        self.matvec_into(x, &mut out);
-        out
+        self.matvec_into(x, &mut out)?;
+        Ok(out)
     }
 }
 
@@ -85,10 +85,10 @@ impl<F> MatTransposeVec<DVector<F>> for CscMatrix<F>
 where
     F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
 {
-    fn mat_transpose_vec(&self, x: &DVector<F>) -> DVector<F> {
+    fn mat_transpose_vec(&self, x: &DVector<F>) -> Result<DVector<F>, Self::Error> {
         let mut out = DVector::zeros(self.ncols());
-        self.mat_transpose_vec_into(x, &mut out);
-        out
+        self.mat_transpose_vec_into(x, &mut out)?;
+        Ok(out)
     }
 }
 
@@ -96,7 +96,7 @@ impl<F> MatVecInto<DVector<F>> for CscMatrix<F>
 where
     F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
 {
-    fn matvec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
+    fn matvec_into(&self, x: &DVector<F>, out: &mut DVector<F>) -> Result<(), Self::Error> {
         assert_eq!(self.ncols(), x.len(), "matvec_into: dimension mismatch");
         assert_eq!(
             self.nrows(),
@@ -110,6 +110,7 @@ where
             Op::NoOp(self),
             Op::NoOp(x.as_view()),
         );
+        Ok(())
     }
 }
 
@@ -117,7 +118,11 @@ impl<F> MatTransposeVecInto<DVector<F>> for CscMatrix<F>
 where
     F: Scalar + nalgebra::Scalar + ClosedAddAssign + ClosedMulAssign,
 {
-    fn mat_transpose_vec_into(&self, x: &DVector<F>, out: &mut DVector<F>) {
+    fn mat_transpose_vec_into(
+        &self,
+        x: &DVector<F>,
+        out: &mut DVector<F>,
+    ) -> Result<(), Self::Error> {
         assert_eq!(
             self.nrows(),
             x.len(),
@@ -135,6 +140,7 @@ where
             Op::Transpose(self),
             Op::NoOp(x.as_view()),
         );
+        Ok(())
     }
 }
 
@@ -144,29 +150,29 @@ impl<F> ColumnStats<F> for CscMatrix<F>
 where
     F: Scalar + nalgebra::Scalar + MaybeSend + MaybeSync,
 {
-    fn col_means(&self) -> Vec<F> {
+    fn col_means(&self) -> Result<Vec<F>, Self::Error> {
         let n = F::from_usize(self.nrows()).unwrap();
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             let sum: F = values[start..end].iter().copied().sum();
             sum / n
-        })
+        }))
     }
 
-    fn col_sds(&self) -> Vec<F> {
+    fn col_sds(&self) -> Result<Vec<F>, Self::Error> {
         let nrows = self.nrows();
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             sparse_column_sd(&values[start..end], nrows)
-        })
+        }))
     }
 
-    fn col_mins(&self) -> Vec<F> {
+    fn col_mins(&self) -> Result<Vec<F>, Self::Error> {
         let nrows = self.nrows();
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             min_or_nan(
                 values[start..end]
@@ -174,13 +180,13 @@ where
                     .copied()
                     .chain((end - start < nrows).then_some(F::zero())),
             )
-        })
+        }))
     }
 
-    fn col_ranges(&self) -> Vec<F> {
+    fn col_ranges(&self) -> Result<Vec<F>, Self::Error> {
         let nrows = self.nrows();
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             range_or_nan(
                 values[start..end]
@@ -188,35 +194,35 @@ where
                     .copied()
                     .chain((end - start < nrows).then_some(F::zero())),
             )
-        })
+        }))
     }
 
-    fn col_maxabs(&self) -> Vec<F> {
+    fn col_maxabs(&self) -> Result<Vec<F>, Self::Error> {
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             max_or_nan(values[start..end].iter().map(|v| v.abs()))
-        })
+        }))
     }
 
-    fn col_l1(&self) -> Vec<F> {
+    fn col_l1(&self) -> Result<Vec<F>, Self::Error> {
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             values[start..end].iter().map(|value| value.abs()).sum()
-        })
+        }))
     }
 
-    fn col_l2(&self) -> Vec<F> {
+    fn col_l2(&self) -> Result<Vec<F>, Self::Error> {
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             let sum_sq: F = values[start..end].iter().map(|&v| v * v).sum();
             sum_sq.sqrt()
-        })
+        }))
     }
 
-    fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l2_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
@@ -224,17 +230,17 @@ where
         );
         let nrows = self.nrows();
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             let c = centers[j];
             let nnz = end - start;
             let stored: F = values[start..end].iter().map(|&v| (v - c) * (v - c)).sum();
             let implicit = F::from_usize(nrows - nnz).unwrap();
             (stored + implicit * c * c).sqrt()
-        })
+        }))
     }
 
-    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l1_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
@@ -242,7 +248,7 @@ where
         );
         let nrows = self.nrows();
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             let center = centers[j];
             let stored: F = values[start..end]
@@ -254,10 +260,10 @@ where
             } else {
                 stored
             }
-        })
+        }))
     }
 
-    fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_maxabs_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
@@ -265,7 +271,7 @@ where
         );
         let nrows = self.nrows();
         let (col_offsets, _row_idx, values) = self.csc_data();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             let (start, end) = (col_offsets[j], col_offsets[j + 1]);
             let c = centers[j];
             if end - start < nrows {
@@ -278,6 +284,10 @@ where
             } else {
                 max_or_nan(values[start..end].iter().map(|&v| (v - c).abs()))
             }
-        })
+        }))
     }
+}
+
+impl<F> crate::MatrixErrorType for CscMatrix<F> {
+    type Error = std::convert::Infallible;
 }

@@ -18,7 +18,9 @@ re-exports. The main implementation is divided as follows:
   sparse, and vector implementations. `src/backends/ndarray/` contains dense
   matrix and vector implementations. `src/backends/sprs/` contains sparse
   statistics and the checked `SprsCsc` and `SprsCsr` wrappers; `src/backends/sprs.rs`
-  implements CSC and CSR products. Shared helpers live in `src/backends/support.rs`.
+  implements CSC and CSR products. `src/backends/zarrs.rs` and its statistics
+module scan synchronous Zarr arrays one chunk at a time. Shared helpers live in
+`src/backends/support.rs`.
 
 Keep backend-independent logic out of backend implementation directories. With
 no features enabled, the crate provides its traits and `LazyMatrix` with only
@@ -26,7 +28,7 @@ no features enabled, the crate provides its traits and `LazyMatrix` with only
 a matrix/vector pair. This crate contains no FFI.
 
 Each supported backend release has a version feature, such as `faer_v0_22`.
-The unversioned `faer`, `nalgebra`, `ndarray`, and `sprs` features select the newest
+The unversioned `faer`, `nalgebra`, `ndarray`, `sprs`, and `zarrs` features select the newest
 supported release. If feature unification enables multiple releases, implement
 only the newest enabled release. Keep crate aliases in `src/lib.rs` and
 `tests/common/backend_aliases.rs` synchronized; examples also use the latter.
@@ -61,6 +63,24 @@ Preserve these normalization semantics:
   the sparse closed-form `*_centered` methods, including contributions from
   implicit zeros. Preserve IEEE nonfinite values.
 - Store centers and scales as `Vec<F>`, not backend-specific vector types.
+
+## Fallible Operations and Storage
+
+Products, `ColumnStats` methods, and `LazyMatrix::new` return `Result`. Share one
+associated error through `MatrixErrorType`; in-memory backends use `Infallible`.
+Dimension mismatches still panic. Reusable outputs may be partial after an error;
+normalization corrections must run only after the backend succeeds. Forward the
+combined `normalization_stats` hook through references and wrappers so storage
+backends retain their shared scans. `NormalizationStats<F>` is the pair of
+optional center and raw-scale vectors; only computed `LazyMatrix` construction
+replaces exact zero scales with one.
+
+The zarrs 0.22 backend supports synchronous two-dimensional floating-point arrays
+and Rust 1.87. Read chunks serially, preserve configured fill values, and exclude
+edge padding. Keep working vectors in RAM and never materialize the full array.
+Chunk buffers and codec workspaces depend on storage chunk size, including outer
+shards. Borrowing capabilities must not hide decoding or I/O. Tests use counting
+and failing stores; larger-than-RAM benchmarks remain manual.
 
 ## Column Access & Capability Boundaries
 

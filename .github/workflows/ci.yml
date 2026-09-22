@@ -75,12 +75,19 @@ jobs:
             args: version ndarray_v0_17
           - group: sprs-0.11
             args: version sprs_v0_11
+          - group: zarrs-0.22
+            args: version zarrs_v0_22
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.group }}
       - run: bash scripts/test-backends.sh ${{ matrix.args }}
+      - name: Run out-of-core examples
+        if: matrix.group == 'core'
+        run: |
+          cargo run --locked --example ndarray_mmap --features ndarray
+          cargo run --locked --example zarrs_chunked --features zarrs
 
   msrv:
     name: MSRV (Rust 1.87)

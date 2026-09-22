@@ -30,7 +30,7 @@ use rand_chacha::ChaCha8Rng;
 
 /// Estimate `λ_max(AᵀA)` (the gradient's Lipschitz constant) by power iteration
 /// on `AᵀA`, using only `matvec`/`mat_transpose_vec`.
-fn estimate_lipschitz<Op>(op: &Op, ncols: usize, iters: usize) -> f64
+fn estimate_lipschitz<Op>(op: &Op, ncols: usize, iters: usize) -> Result<f64, Op::Error>
 where
     Op: MatVecInto<Col<f64>> + MatTransposeVecInto<Col<f64>>,
 {
@@ -39,8 +39,8 @@ where
     let mut atav = Col::<f64>::zeros(ncols);
     let mut lambda = 1.0;
     for _ in 0..iters {
-        op.matvec_into(&v, &mut av);
-        op.mat_transpose_vec_into(&av, &mut atav); // AᵀA v
+        op.matvec_into(&v, &mut av)?;
+        op.mat_transpose_vec_into(&av, &mut atav)?; // AᵀA v
         lambda = atav.norm_l2();
         if lambda == 0.0 {
             break;
@@ -48,7 +48,7 @@ where
         atav.scale_assign(1.0 / lambda);
         std::mem::swap(&mut v, &mut atav);
     }
-    lambda
+    Ok(lambda)
 }
 
 /// Gradient descent on `½‖Aβ − y‖²`. Returns `(β, iterations, final ‖grad‖)`.
@@ -59,7 +59,7 @@ fn gradient_descent<Op>(
     step: f64,
     max_iter: usize,
     tol: f64,
-) -> (Col<f64>, usize, f64)
+) -> Result<(Col<f64>, usize, f64), Op::Error>
 where
     Op: MatVecInto<Col<f64>> + MatTransposeVecInto<Col<f64>>,
 {
@@ -68,20 +68,20 @@ where
     let mut grad = Col::<f64>::zeros(ncols);
     let mut last = f64::INFINITY;
     for k in 0..max_iter {
-        op.matvec_into(&beta, &mut resid);
+        op.matvec_into(&beta, &mut resid)?;
         resid.scaled_add_assign(-1.0, y); // Aβ − y
-        op.mat_transpose_vec_into(&resid, &mut grad); // Aᵀ(Aβ − y)
+        op.mat_transpose_vec_into(&resid, &mut grad)?; // Aᵀ(Aβ − y)
         let gnorm = grad.norm_l2();
         if gnorm < tol {
-            return (beta, k, gnorm);
+            return Ok((beta, k, gnorm));
         }
         beta.scaled_add_assign(-step, &grad);
         last = gnorm;
     }
-    (beta, max_iter, last)
+    Ok((beta, max_iter, last))
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (nrows, ncols, density) = (120, 10, 0.4);
     let mut rng = ChaCha8Rng::seed_from_u64(0xC0FFEE);
 
@@ -94,26 +94,26 @@ fn main() {
             }
         }
     }
-    let x = SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &triplets).unwrap();
+    let x = SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &triplets)?;
 
     // Standardize columns lazily (center + unit sd), never forming X − 1cᵀ.
-    let lazy = LazyMatrix::new(x, Normalization::new(Centering::Mean, Scaling::Sd));
+    let lazy = LazyMatrix::new(x, Normalization::new(Centering::Mean, Scaling::Sd))?;
 
     // Ground-truth coefficients and a noiseless target y = X̃ β*.
     let beta_star = Col::<f64>::from_fn(ncols, |j| ((j as f64) - 4.5) * 0.5);
-    let y = lazy.matvec(&beta_star);
+    let y = lazy.matvec(&beta_star)?;
 
-    let l = estimate_lipschitz(&lazy, ncols, 100);
+    let l = estimate_lipschitz(&lazy, ncols, 100)?;
     let step = 1.0 / l;
     println!("estimated Lipschitz L ≈ {l:.4}, step = 1/L = {step:.4e}");
 
-    let (beta, iters, gnorm) = gradient_descent(&lazy, &y, ncols, step, 50_000, 1e-10);
+    let (beta, iters, gnorm) = gradient_descent(&lazy, &y, ncols, step, 50_000, 1e-10)?;
 
     let mut coefficient_error = beta.clone();
     coefficient_error.scaled_add_assign(-1.0, &beta_star);
     let err = coefficient_error.norm_l2();
     let loss = 0.5 * {
-        let mut r = lazy.matvec(&beta);
+        let mut r = lazy.matvec(&beta)?;
         r.scaled_add_assign(-1.0, &y);
         r.dot(&r)
     };
@@ -123,4 +123,5 @@ fn main() {
     for j in 0..ncols {
         println!("  {j:>2}  {:>8.4}  {:>8.4}", beta_star[j], beta[j]);
     }
+    Ok(())
 }

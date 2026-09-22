@@ -35,6 +35,8 @@
 //!   With an ndarray feature, also supports that release's `Array1` vectors.
 //!   `SprsCsc` checks CSC orientation for borrowed columns; `SprsCsr` checks
 //!   CSR orientation for borrowed rows.
+//! * `zarrs` — synchronous chunked `ZarrMatrix` arrays over `Vec`, with
+//!   fallible products and statistics. Supports `f32` and `f64`.
 //! * `parallel` — parallel column statistics through Rayon; also enables the
 //!   selected faer release's Rayon support.
 //!
@@ -47,6 +49,7 @@
 //! | nalgebra | `nalgebra_v0_32`, `nalgebra_v0_33`, `nalgebra_v0_34`, `nalgebra_v0_35` | 0.35 |
 //! | ndarray | `ndarray_v0_15`, `ndarray_v0_16`, `ndarray_v0_17` | 0.17 |
 //! | sprs | `sprs_v0_11` | 0.11 |
+//! | zarrs | `zarrs_v0_22` | 0.22 |
 //!
 //! If Cargo enables several releases of one backend, only the newest enabled
 //! release receives trait implementations. Select the same release line in
@@ -69,8 +72,8 @@
 //! // `x` is some backend matrix implementing `MatVec`, `MatTransposeVec`,
 //! // `ColumnStats`, `MatrixShape`; `v` a backend vector.
 //! let spec = Normalization::new(Centering::Mean, Scaling::Sd);
-//! let lazy = LazyMatrix::new(x, spec);
-//! let y = lazy.matvec(&v); // == ((X − 1cᵀ)S⁻¹) v, sparsity preserved
+//! let lazy = LazyMatrix::new(x, spec).unwrap();
+//! let y = lazy.matvec(&v).unwrap(); // == ((X − 1cᵀ)S⁻¹) v, sparsity preserved
 //! ```
 //!
 //! With any ndarray version feature, a matrix view borrows the original array:
@@ -89,8 +92,8 @@
 //! let lazy = LazyMatrix::new(
 //!     x.view(),
 //!     Normalization::new(Centering::Mean, Scaling::Sd),
-//! );
-//! let y = lazy.matvec(&array![1.0, -1.0]);
+//! ).unwrap();
+//! let y = lazy.matvec(&array![1.0, -1.0]).unwrap();
 //! assert_eq!(y.len(), 3);
 //! # }
 //! ```
@@ -125,6 +128,46 @@
 //! statistics. Borrowing rows requires `usize` column indices, while pointer
 //! indices may use any supported width. The slices describe the original
 //! matrix, before normalization; normalized row views remain future work.
+
+//! # Operational errors and out-of-core storage
+//!
+//! Products, [`ColumnStats`] methods, and [`LazyMatrix::new`] return `Result`.
+//! [`MatrixErrorType`] gives each backend one shared error type. In-memory
+//! backends use [`std::convert::Infallible`]; storage backends propagate read
+//! and decoding errors. Dimension mismatches still panic. After a failed
+//! reusable-output product, discard the partial output or overwrite it with a
+//! successful product. Borrowed views and explicit normalization parameters do
+//! not require I/O and retain their infallible APIs.
+//!
+//! With `zarrs`, `ZarrMatrix` wraps an opened synchronous array without reading
+//! its chunks. Each product scans chunks serially, and normalization shares work
+//! through [`ColumnStats::normalization_stats`] to need at most two scans. Working
+//! vectors stay in RAM. Memory for data and codecs depends on chunk size, including
+//! the outer shard for sharded storage; no strict byte budget is imposed. The
+//! backing array must remain unchanged throughout normalization and use.
+//! Filesystem and gzip support are enabled; additional codecs can be selected
+//! through a direct zarrs dependency. No ndarray backend is selected by `zarrs`.
+//!
+//! ```
+//! # #[cfg(feature = "zarrs_all")]
+//! # {
+//! use std::sync::Arc;
+//! use lazymatrix::{Centering, LazyMatrix, MatVec, Normalization, Scaling, ZarrMatrix};
+//! use zarrs::{array::{ArrayBuilder, DataType}, storage::store::MemoryStore};
+//!
+//! let array = ArrayBuilder::new(vec![3, 2], vec![2, 2], DataType::Float64, 1.0f64)
+//!     .build(Arc::new(MemoryStore::new()), "/matrix")?;
+//! let matrix = ZarrMatrix::<_, f64>::try_new(array)?;
+//! let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd))?;
+//! assert_eq!(lazy.matvec(&vec![1.0, 2.0])?, vec![0.0; 3]);
+//! # }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
+//!
+//! Borrowed ndarray views can also wrap memory-mapped `.npy` data. The
+//! `ndarray_mmap` example uses ndarray 0.17 and a private, immutable backing file.
+//! The `zarrs_chunked` example creates a filesystem array chunk by chunk. Both
+//! accept row and column counts and print normalization and product timings.
 
 // Cargo feature unification may enable several releases of one backend.
 // Only the newest enabled release receives trait implementations.
@@ -242,6 +285,12 @@ extern crate sprs;
 #[cfg(all(feature = "sprs_all", not(feature = "sprs_v0_11")))]
 compile_error!("`sprs_all` is internal; enable `sprs` or a `sprs_v*` feature");
 
+#[cfg(feature = "zarrs_v0_22")]
+extern crate zarrs;
+
+#[cfg(all(feature = "zarrs_all", not(feature = "zarrs_v0_22")))]
+compile_error!("`zarrs_all` is internal; enable `zarrs` or a `zarrs_v*` feature");
+
 mod backends;
 mod column;
 mod matrix;
@@ -250,12 +299,14 @@ pub mod traits;
 
 #[cfg(feature = "sprs_all")]
 pub use backends::sprs::{SprsCsc, SprsCsr};
+#[cfg(feature = "zarrs_all")]
+pub use backends::zarrs::{ZarrMatrix, ZarrMatrixError};
 pub use column::{LazyColumn, LazySparseColumn, SparseColumnRef};
 pub use matrix::LazyMatrix;
-pub use normalization::{Centering, Normalization, Scaling};
+pub use normalization::{Centering, Normalization, NormalizationStats, Scaling};
 pub use traits::{
     ColumnStats, Columns, DotProduct, DotSlice, ElemDivAssign, L2Norm, LogicalColumn,
-    MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, RawColumn, RawColumns,
-    Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns, SparseRows,
-    SubScalarAssign, SumEntries, VectorView, VectorViewMut,
+    MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixErrorType, MatrixShape,
+    RawColumn, RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns,
+    SparseRows, SubScalarAssign, SumEntries, VectorView, VectorViewMut,
 };

@@ -168,30 +168,36 @@ fn mat_transpose_vec_into<F: Scalar>(
 macro_rules! impl_dense_ops {
     ($matrix:ty) => {
         impl<F: Scalar> MatVec<Col<F>> for $matrix {
-            fn matvec(&self, x: &Col<F>) -> Col<F> {
+            fn matvec(&self, x: &Col<F>) -> Result<Col<F>, Self::Error> {
                 let mut out = Col::from_fn(self.nrows(), |_| F::zero());
-                self.matvec_into(x, &mut out);
-                out
+                self.matvec_into(x, &mut out)?;
+                Ok(out)
             }
         }
 
         impl<F: Scalar> MatTransposeVec<Col<F>> for $matrix {
-            fn mat_transpose_vec(&self, x: &Col<F>) -> Col<F> {
+            fn mat_transpose_vec(&self, x: &Col<F>) -> Result<Col<F>, Self::Error> {
                 let mut out = Col::from_fn(self.ncols(), |_| F::zero());
-                self.mat_transpose_vec_into(x, &mut out);
-                out
+                self.mat_transpose_vec_into(x, &mut out)?;
+                Ok(out)
             }
         }
 
         impl<F: Scalar> MatVecInto<Col<F>> for $matrix {
-            fn matvec_into(&self, x: &Col<F>, out: &mut Col<F>) {
-                matvec_into(self.nrows(), self.ncols(), |i, j| self[(i, j)], x, out)
+            fn matvec_into(&self, x: &Col<F>, out: &mut Col<F>) -> Result<(), Self::Error> {
+                matvec_into(self.nrows(), self.ncols(), |i, j| self[(i, j)], x, out);
+                Ok(())
             }
         }
 
         impl<F: Scalar> MatTransposeVecInto<Col<F>> for $matrix {
-            fn mat_transpose_vec_into(&self, x: &Col<F>, out: &mut Col<F>) {
-                mat_transpose_vec_into(self.nrows(), self.ncols(), |i, j| self[(i, j)], x, out)
+            fn mat_transpose_vec_into(
+                &self,
+                x: &Col<F>,
+                out: &mut Col<F>,
+            ) -> Result<(), Self::Error> {
+                mat_transpose_vec_into(self.nrows(), self.ncols(), |i, j| self[(i, j)], x, out);
+                Ok(())
             }
         }
     };
@@ -240,54 +246,54 @@ macro_rules! impl_dense_stats {
         where
             F: Scalar + MaybeSend + MaybeSync,
         {
-            fn col_means(&self) -> Vec<F> {
-                means(self.nrows(), self.ncols(), |i, j| self[(i, j)])
+            fn col_means(&self) -> Result<Vec<F>, Self::Error> {
+                Ok(means(self.nrows(), self.ncols(), |i, j| self[(i, j)]))
             }
 
-            fn col_sds(&self) -> Vec<F> {
-                sds(self.nrows(), self.ncols(), |i, j| self[(i, j)])
+            fn col_sds(&self) -> Result<Vec<F>, Self::Error> {
+                Ok(sds(self.nrows(), self.ncols(), |i, j| self[(i, j)]))
             }
 
-            fn col_mins(&self) -> Vec<F> {
-                collect_columns(self.ncols(), |j| {
+            fn col_mins(&self) -> Result<Vec<F>, Self::Error> {
+                Ok(collect_columns(self.ncols(), |j| {
                     min_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
-                })
+                }))
             }
 
-            fn col_ranges(&self) -> Vec<F> {
-                collect_columns(self.ncols(), |j| {
+            fn col_ranges(&self) -> Result<Vec<F>, Self::Error> {
+                Ok(collect_columns(self.ncols(), |j| {
                     range_or_nan((0..self.nrows()).map(|i| self[(i, j)]))
-                })
+                }))
             }
 
-            fn col_maxabs(&self) -> Vec<F> {
-                collect_columns(self.ncols(), |j| {
+            fn col_maxabs(&self) -> Result<Vec<F>, Self::Error> {
+                Ok(collect_columns(self.ncols(), |j| {
                     max_or_nan((0..self.nrows()).map(|i| self[(i, j)].abs()))
-                })
+                }))
             }
 
-            fn col_l1(&self) -> Vec<F> {
-                collect_columns(self.ncols(), |j| {
+            fn col_l1(&self) -> Result<Vec<F>, Self::Error> {
+                Ok(collect_columns(self.ncols(), |j| {
                     (0..self.nrows()).map(|i| self[(i, j)].abs()).sum()
-                })
+                }))
             }
 
-            fn col_l2(&self) -> Vec<F> {
-                collect_columns(self.ncols(), |j| {
+            fn col_l2(&self) -> Result<Vec<F>, Self::Error> {
+                Ok(collect_columns(self.ncols(), |j| {
                     (0..self.nrows())
                         .map(|i| self[(i, j)] * self[(i, j)])
                         .sum::<F>()
                         .sqrt()
-                })
+                }))
             }
 
-            fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+            fn col_l2_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
                 assert_eq!(
                     centers.len(),
                     self.ncols(),
                     "col_l2_centered: length mismatch"
                 );
-                collect_columns(self.ncols(), |j| {
+                Ok(collect_columns(self.ncols(), |j| {
                     (0..self.nrows())
                         .map(|i| {
                             let value = self[(i, j)] - centers[j];
@@ -295,31 +301,31 @@ macro_rules! impl_dense_stats {
                         })
                         .sum::<F>()
                         .sqrt()
-                })
+                }))
             }
 
-            fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+            fn col_l1_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
                 assert_eq!(
                     centers.len(),
                     self.ncols(),
                     "col_l1_centered: length mismatch"
                 );
-                collect_columns(self.ncols(), |j| {
+                Ok(collect_columns(self.ncols(), |j| {
                     (0..self.nrows())
                         .map(|i| (self[(i, j)] - centers[j]).abs())
                         .sum()
-                })
+                }))
             }
 
-            fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+            fn col_maxabs_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
                 assert_eq!(
                     centers.len(),
                     self.ncols(),
                     "col_maxabs_centered: length mismatch"
                 );
-                collect_columns(self.ncols(), |j| {
+                Ok(collect_columns(self.ncols(), |j| {
                     max_or_nan((0..self.nrows()).map(|i| (self[(i, j)] - centers[j]).abs()))
-                })
+                }))
             }
         }
     };
@@ -327,3 +333,11 @@ macro_rules! impl_dense_stats {
 
 impl_dense_stats!(Mat<F>);
 impl_dense_stats!(MatRef<'_, F>);
+
+impl<F> crate::MatrixErrorType for Mat<F> {
+    type Error = std::convert::Infallible;
+}
+
+impl<F> crate::MatrixErrorType for MatRef<'_, F> {
+    type Error = std::convert::Infallible;
+}

@@ -176,11 +176,11 @@ fn reusable_output_parity<M, V>(
             let xtilde = materialize(&tm.dense, c.as_deref(), s.as_deref());
 
             let mut y = to_v(&vec![123.0; tm.nrows]);
-            lazy.matvec_into(&v, &mut y);
+            lazy.matvec_into(&v, &mut y).unwrap();
             assert_close(&from_v(&y), &dense_matvec(&xtilde, &from_v(&v)), EPS);
 
             let mut z = to_v(&vec![123.0; tm.ncols]);
-            lazy.mat_transpose_vec_into(&u, &mut z);
+            lazy.mat_transpose_vec_into(&u, &mut z).unwrap();
             assert_close(&from_v(&z), &dense_tmatvec(&xtilde, &from_v(&u)), EPS);
         }
     }
@@ -190,7 +190,7 @@ fn reusable_output_parity<M, V>(
     let mut y = to_v(&vec![0.0; tm.nrows]);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            matrix.matvec_into(&short_v, &mut y);
+            matrix.matvec_into(&short_v, &mut y).unwrap();
         }))
         .is_err()
     );
@@ -198,7 +198,7 @@ fn reusable_output_parity<M, V>(
     let mut short_y = to_v(&vec![0.0; tm.nrows - 1]);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            matrix.matvec_into(&v, &mut short_y);
+            matrix.matvec_into(&v, &mut short_y).unwrap();
         }))
         .is_err()
     );
@@ -207,7 +207,7 @@ fn reusable_output_parity<M, V>(
     let mut z = to_v(&vec![0.0; tm.ncols]);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            matrix.mat_transpose_vec_into(&short_u, &mut z);
+            matrix.mat_transpose_vec_into(&short_u, &mut z).unwrap();
         }))
         .is_err()
     );
@@ -215,7 +215,7 @@ fn reusable_output_parity<M, V>(
     let mut short_z = to_v(&vec![0.0; tm.ncols - 1]);
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            matrix.mat_transpose_vec_into(&u, &mut short_z);
+            matrix.mat_transpose_vec_into(&u, &mut short_z).unwrap();
         }))
         .is_err()
     );
@@ -228,19 +228,25 @@ fn reusable_output_parity<M, V>(
     };
     let no_rows = LazyMatrix::<_, f64>::from_parts(build(&no_rows), None, None);
     let mut empty = to_v(&[]);
-    no_rows.matvec_into(&to_v(&[1.0, 2.0, 3.0]), &mut empty);
+    no_rows
+        .matvec_into(&to_v(&[1.0, 2.0, 3.0]), &mut empty)
+        .unwrap();
     assert!(from_v(&empty).is_empty());
     let mut zeros = to_v(&[123.0, 123.0, 123.0]);
-    no_rows.mat_transpose_vec_into(&to_v(&[]), &mut zeros);
+    no_rows
+        .mat_transpose_vec_into(&to_v(&[]), &mut zeros)
+        .unwrap();
     assert_eq!(from_v(&zeros), vec![0.0; 3]);
 
     let no_columns = random_matrix(106, 3, 0, 0.5);
     let no_columns = LazyMatrix::<_, f64>::from_parts(build(&no_columns), None, None);
     let mut zeros = to_v(&[123.0, 123.0, 123.0]);
-    no_columns.matvec_into(&to_v(&[]), &mut zeros);
+    no_columns.matvec_into(&to_v(&[]), &mut zeros).unwrap();
     assert_eq!(from_v(&zeros), vec![0.0; 3]);
     let mut empty = to_v(&[]);
-    no_columns.mat_transpose_vec_into(&to_v(&[1.0, 2.0, 3.0]), &mut empty);
+    no_columns
+        .mat_transpose_vec_into(&to_v(&[1.0, 2.0, 3.0]), &mut empty)
+        .unwrap();
     assert!(from_v(&empty).is_empty());
 }
 
@@ -473,7 +479,8 @@ where
     }
 
     let matrix = build(&tm);
-    let borrowed = LazyMatrix::new(&matrix, Normalization::new(Centering::Mean, Scaling::Sd));
+    let borrowed =
+        LazyMatrix::new(&matrix, Normalization::new(Centering::Mean, Scaling::Sd)).unwrap();
     assert_eq!(borrowed.nrows(), tm.nrows);
     assert_eq!(borrowed.ncols(), tm.ncols);
     assert_eq!(borrowed.column(0).len(), tm.nrows);
@@ -833,15 +840,33 @@ where
         triplets: Vec::new(),
     };
     let matrix = build(&no_rows);
-    assert!(matrix.col_means().iter().all(|value| value.is_nan()));
-    assert!(matrix.col_sds().iter().all(|value| value.is_nan()));
-    assert!(matrix.col_mins().iter().all(|value| value.is_nan()));
-    assert!(matrix.col_ranges().iter().all(|value| value.is_nan()));
-    assert_eq!(matrix.col_maxabs(), vec![0.0, 0.0]);
-    assert_eq!(matrix.col_l1(), vec![0.0, 0.0]);
-    assert_eq!(matrix.col_l2(), vec![0.0, 0.0]);
+    assert!(
+        matrix
+            .col_means()
+            .unwrap()
+            .iter()
+            .all(|value| value.is_nan())
+    );
+    assert!(matrix.col_sds().unwrap().iter().all(|value| value.is_nan()));
+    assert!(
+        matrix
+            .col_mins()
+            .unwrap()
+            .iter()
+            .all(|value| value.is_nan())
+    );
+    assert!(
+        matrix
+            .col_ranges()
+            .unwrap()
+            .iter()
+            .all(|value| value.is_nan())
+    );
+    assert_eq!(matrix.col_maxabs().unwrap(), vec![0.0, 0.0]);
+    assert_eq!(matrix.col_l1().unwrap(), vec![0.0, 0.0]);
+    assert_eq!(matrix.col_l2().unwrap(), vec![0.0, 0.0]);
 
-    let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd));
+    let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd)).unwrap();
     assert!(lazy.centers().unwrap().iter().all(|value| value.is_nan()));
     assert!(lazy.scales().unwrap().iter().all(|value| value.is_nan()));
 
@@ -852,16 +877,16 @@ where
         triplets: vec![(0, 0, f64::NAN), (1, 0, 1.0)],
     };
     let matrix = build(&nan_column);
-    assert!(matrix.col_means()[0].is_nan());
-    assert!(matrix.col_sds()[0].is_nan());
-    assert!(matrix.col_mins()[0].is_nan());
-    assert!(matrix.col_ranges()[0].is_nan());
-    assert!(matrix.col_maxabs()[0].is_nan());
-    assert!(matrix.col_l1()[0].is_nan());
-    assert!(matrix.col_l2()[0].is_nan());
-    assert!(matrix.col_l1_centered(&[0.0])[0].is_nan());
-    assert!(matrix.col_l2_centered(&[0.0])[0].is_nan());
-    assert!(matrix.col_maxabs_centered(&[0.0])[0].is_nan());
+    assert!(matrix.col_means().unwrap()[0].is_nan());
+    assert!(matrix.col_sds().unwrap()[0].is_nan());
+    assert!(matrix.col_mins().unwrap()[0].is_nan());
+    assert!(matrix.col_ranges().unwrap()[0].is_nan());
+    assert!(matrix.col_maxabs().unwrap()[0].is_nan());
+    assert!(matrix.col_l1().unwrap()[0].is_nan());
+    assert!(matrix.col_l2().unwrap()[0].is_nan());
+    assert!(matrix.col_l1_centered(&[0.0]).unwrap()[0].is_nan());
+    assert!(matrix.col_l2_centered(&[0.0]).unwrap()[0].is_nan());
+    assert!(matrix.col_maxabs_centered(&[0.0]).unwrap()[0].is_nan());
 
     let implicit_zero = TestMatrix {
         nrows: 2,
@@ -869,7 +894,12 @@ where
         dense: vec![vec![1.0], vec![0.0]],
         triplets: vec![(0, 0, 1.0)],
     };
-    assert!(build(&implicit_zero).col_maxabs_centered(&[f64::NAN])[0].is_nan());
+    assert!(
+        build(&implicit_zero)
+            .col_maxabs_centered(&[f64::NAN])
+            .unwrap()[0]
+            .is_nan()
+    );
 }
 
 /// Standard deviations retain small variation around a large offset.
@@ -889,7 +919,11 @@ where
         ],
     };
 
-    assert_close(&build(&tm).col_sds(), &[(2.0_f64 / 3.0).sqrt()], EPS);
+    assert_close(
+        &build(&tm).col_sds().unwrap(),
+        &[(2.0_f64 / 3.0).sqrt()],
+        EPS,
+    );
 }
 
 /// The wrapper obtains its dimensions from the backend matrix.
@@ -939,11 +973,11 @@ fn oracle_parity<M, V>(
             let lazy = LazyMatrix::from_parts(build(&tm), c.clone(), s.clone());
             let xtilde = materialize(&tm.dense, c.as_deref(), s.as_deref());
 
-            let got = from_v(&lazy.matvec(&v));
+            let got = from_v(&lazy.matvec(&v).unwrap());
             let want = dense_matvec(&xtilde, &from_v(&v));
             assert_close(&got, &want, EPS);
 
-            let got_t = from_v(&lazy.mat_transpose_vec(&u));
+            let got_t = from_v(&lazy.mat_transpose_vec(&u).unwrap());
             let want_t = dense_tmatvec(&xtilde, &from_v(&u));
             assert_close(&got_t, &want_t, EPS);
         }
@@ -974,8 +1008,8 @@ fn adjoint_identity<M, V>(
     let v = to_v(&random_vec(9, tm.ncols));
     let u = to_v(&random_vec(10, tm.nrows));
 
-    let xv = from_v(&lazy.matvec(&v));
-    let xtu = from_v(&lazy.mat_transpose_vec(&u));
+    let xv = from_v(&lazy.matvec(&v).unwrap());
+    let xtu = from_v(&lazy.mat_transpose_vec(&u).unwrap());
     let lhs = dot(&xv, &from_v(&u));
     let rhs = dot(&from_v(&v), &xtu);
     approx::assert_abs_diff_eq!(lhs, rhs, epsilon = 1e-9);
@@ -1000,12 +1034,12 @@ fn from_parts_passthrough<M, V>(
     let u = to_v(&random_vec(13, tm.nrows));
 
     let bare = build(&tm);
-    let bare_y = from_v(&bare.matvec(&v));
-    let bare_t = from_v(&bare.mat_transpose_vec(&u));
+    let bare_y = from_v(&bare.matvec(&v).unwrap());
+    let bare_t = from_v(&bare.mat_transpose_vec(&u).unwrap());
 
     let lazy = LazyMatrix::from_parts(build(&tm), None, None);
-    assert_eq!(from_v(&lazy.matvec(&v)), bare_y);
-    assert_eq!(from_v(&lazy.mat_transpose_vec(&u)), bare_t);
+    assert_eq!(from_v(&lazy.matvec(&v).unwrap()), bare_y);
+    assert_eq!(from_v(&lazy.mat_transpose_vec(&u).unwrap()), bare_t);
 }
 
 /// `new()` with every strategy: read back the computed centers/scales and
@@ -1039,12 +1073,12 @@ fn new_matches_oracle<M, V>(
     for center in centerings {
         for scale in scalings {
             let spec = Normalization::new(center, scale);
-            let lazy = LazyMatrix::new(build(&tm), spec);
+            let lazy = LazyMatrix::new(build(&tm), spec).unwrap();
             let xtilde = materialize(&tm.dense, lazy.centers(), lazy.scales());
 
-            let got = from_v(&lazy.matvec(&v));
+            let got = from_v(&lazy.matvec(&v).unwrap());
             assert_close(&got, &dense_matvec(&xtilde, &from_v(&v)), EPS);
-            let got_t = from_v(&lazy.mat_transpose_vec(&u));
+            let got_t = from_v(&lazy.mat_transpose_vec(&u).unwrap());
             assert_close(&got_t, &dense_tmatvec(&xtilde, &from_v(&u)), EPS);
         }
     }
@@ -1081,33 +1115,45 @@ where
     let m = build(&tm);
 
     // Column 0 = [1,3,0]; column 1 = [0,0,0]; column 2 = [5,5,5].
-    assert_close(&m.col_means(), &[4.0 / 3.0, 0.0, 5.0], EPS);
+    assert_close(&m.col_means().unwrap(), &[4.0 / 3.0, 0.0, 5.0], EPS);
     // population sd: col0 var = 10/3 − (4/3)² = 14/9; col1 = 0; col2 constant = 0
-    assert_close(&m.col_sds(), &[(14.0_f64 / 9.0).sqrt(), 0.0, 0.0], EPS);
-    assert_close(&m.col_mins(), &[0.0, 0.0, 5.0], EPS);
-    assert_close(&m.col_ranges(), &[3.0, 0.0, 0.0], EPS);
-    assert_close(&m.col_maxabs(), &[3.0, 0.0, 5.0], EPS);
-    assert_close(&m.col_l1(), &[4.0, 0.0, 15.0], EPS);
-    assert_close(&m.col_l2(), &[10.0_f64.sqrt(), 0.0, (75.0_f64).sqrt()], EPS);
+    assert_close(
+        &m.col_sds().unwrap(),
+        &[(14.0_f64 / 9.0).sqrt(), 0.0, 0.0],
+        EPS,
+    );
+    assert_close(&m.col_mins().unwrap(), &[0.0, 0.0, 5.0], EPS);
+    assert_close(&m.col_ranges().unwrap(), &[3.0, 0.0, 0.0], EPS);
+    assert_close(&m.col_maxabs().unwrap(), &[3.0, 0.0, 5.0], EPS);
+    assert_close(&m.col_l1().unwrap(), &[4.0, 0.0, 15.0], EPS);
+    assert_close(
+        &m.col_l2().unwrap(),
+        &[10.0_f64.sqrt(), 0.0, (75.0_f64).sqrt()],
+        EPS,
+    );
 
-    let centers = m.col_means();
-    assert_close(&m.col_l1_centered(&centers), &[10.0 / 3.0, 0.0, 0.0], EPS);
+    let centers = m.col_means().unwrap();
+    assert_close(
+        &m.col_l1_centered(&centers).unwrap(),
+        &[10.0 / 3.0, 0.0, 0.0],
+        EPS,
+    );
     // centered l2² of col0 = n·var = 3·14/9 = 14/3; col1 = 0; col2 = 0
     assert_close(
-        &m.col_l2_centered(&centers),
+        &m.col_l2_centered(&centers).unwrap(),
         &[(14.0_f64 / 3.0).sqrt(), 0.0, 0.0],
         EPS,
     );
     // centered maxabs col0: max(|1−4/3|, |3−4/3|, implicit |0−4/3|) = 5/3
     assert_close(
-        &m.col_maxabs_centered(&centers),
+        &m.col_maxabs_centered(&centers).unwrap(),
         &[5.0 / 3.0, 0.0, 0.0],
         EPS,
     );
 
     assert!(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            m.col_l1_centered(&centers[..2])
+            m.col_l1_centered(&centers[..2]).unwrap()
         }))
         .is_err()
     );
@@ -1121,11 +1167,11 @@ where
 {
     let matrix = build(&column_view_matrix());
 
-    assert_close(&matrix.col_mins(), &[-2.0, 0.0, 4.0, 0.0], EPS);
-    assert_close(&matrix.col_ranges(), &[3.0, 0.0, 3.0, 0.0], EPS);
-    assert_close(&matrix.col_l1(), &[3.0, 0.0, 22.0, 0.0], EPS);
+    assert_close(&matrix.col_mins().unwrap(), &[-2.0, 0.0, 4.0, 0.0], EPS);
+    assert_close(&matrix.col_ranges().unwrap(), &[3.0, 0.0, 3.0, 0.0], EPS);
+    assert_close(&matrix.col_l1().unwrap(), &[3.0, 0.0, 22.0, 0.0], EPS);
     assert_close(
-        &matrix.col_l1_centered(&[0.5, -1.0, 2.0, 3.0]),
+        &matrix.col_l1_centered(&[0.5, -1.0, 2.0, 3.0]).unwrap(),
         &[4.0, 4.0, 14.0, 12.0],
         EPS,
     );
@@ -1154,17 +1200,20 @@ where
         ],
     };
 
-    let raw_l1 = LazyMatrix::new(build(&tm), Normalization::new(Centering::None, Scaling::L1));
+    let raw_l1 =
+        LazyMatrix::new(build(&tm), Normalization::new(Centering::None, Scaling::L1)).unwrap();
     assert_close(raw_l1.scales().unwrap(), &[4.0, 1.0, 15.0], EPS);
 
-    let centered_l1 = LazyMatrix::new(build(&tm), Normalization::new(Centering::Mean, Scaling::L1));
+    let centered_l1 =
+        LazyMatrix::new(build(&tm), Normalization::new(Centering::Mean, Scaling::L1)).unwrap();
     assert_close(centered_l1.centers().unwrap(), &[4.0 / 3.0, 0.0, 5.0], EPS);
     assert_close(centered_l1.scales().unwrap(), &[10.0 / 3.0, 1.0, 1.0], EPS);
 
     let min_range = LazyMatrix::new(
         build(&tm),
         Normalization::new(Centering::Min, Scaling::Range),
-    );
+    )
+    .unwrap();
     assert_close(min_range.centers().unwrap(), &[0.0, 0.0, 5.0], EPS);
     assert_close(min_range.scales().unwrap(), &[3.0, 1.0, 1.0], EPS);
 }
@@ -1206,13 +1255,13 @@ fn zero_scale_guard<M, V>(
         Normalization::new(Centering::Mean, Scaling::L1),
         Normalization::new(Centering::Min, Scaling::Range),
     ] {
-        let lazy = LazyMatrix::new(build(&tm), spec);
+        let lazy = LazyMatrix::new(build(&tm), spec).unwrap();
         let scales = lazy.scales().unwrap();
         assert_eq!(scales[1], 1.0, "empty column scale must be floored to 1");
         assert_eq!(scales[2], 1.0, "constant column scale must be floored to 1");
 
         let v = to_v(&random_vec(20, tm.ncols));
-        let y = from_v(&lazy.matvec(&v));
+        let y = from_v(&lazy.matvec(&v).unwrap());
         assert!(y.iter().all(|x| x.is_finite()), "output must be finite");
     }
 }

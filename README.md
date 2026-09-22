@@ -36,6 +36,8 @@ cargo add lazymatrix --features nalgebra
 cargo add lazymatrix --features ndarray
 # or, for sprs sparse matrices
 cargo add lazymatrix --features sprs
+# or, for chunked Zarr arrays
+cargo add lazymatrix --features zarrs
 ```
 
 Unversioned features select the newest supported release. Use a versioned
@@ -47,6 +49,7 @@ feature to stay on a particular release line:
 | nalgebra | `nalgebra_v0_32`, `nalgebra_v0_33`, `nalgebra_v0_34`, `nalgebra_v0_35` | 0.35 |
 | ndarray | `ndarray_v0_15`, `ndarray_v0_16`, `ndarray_v0_17` | 0.17 |
 | sprs | `sprs_v0_11` | 0.11 |
+| zarrs | `zarrs_v0_22` | 0.22 |
 
 For example, `cargo add lazymatrix --features nalgebra_v0_34` enables nalgebra
 0.34 and nalgebra-sparse 0.11. Set your direct backend dependency to the same
@@ -76,9 +79,9 @@ let x = DMatrix::from_row_slice(
 let x = LazyMatrix::new(
     x,
     Normalization::new(Centering::Mean, Scaling::Sd),
-);
+).unwrap();
 
-let y = x.matvec(&DVector::from_vec(vec![1.0, -1.0]));
+let y = x.matvec(&DVector::from_vec(vec![1.0, -1.0])).unwrap();
 ```
 
 The same interface works with faer and nalgebra dense matrices, their borrowed
@@ -93,8 +96,8 @@ let x = array![[1.0, 0.0], [2.0, 3.0], [0.0, 4.0]];
 let lazy = LazyMatrix::new(
     x.view(),
     Normalization::new(Centering::Mean, Scaling::Sd),
-);
-let y = lazy.matvec(&array![1.0, -1.0]);
+).unwrap();
+let y = lazy.matvec(&array![1.0, -1.0]).unwrap();
 ```
 
 Allocating ndarray products use `Array1` vectors. Reusable-output products can
@@ -124,8 +127,8 @@ let x = CsMat::new_csc(
     vec![1.0, 3.0, 2.0],
 );
 let csc = SprsCsc::try_new(x.view()).unwrap();
-let lazy = LazyMatrix::new(csc, Normalization::new(Centering::Mean, Scaling::Sd));
-let y = lazy.matvec(&vec![1.0, -1.0]);
+let lazy = LazyMatrix::new(csc, Normalization::new(Centering::Mean, Scaling::Sd)).unwrap();
+let y = lazy.matvec(&vec![1.0, -1.0]).unwrap();
 let column = lazy.sparse_column(0);
 assert_eq!(column.row_indices(), &[0, 2]);
 ```
@@ -179,6 +182,104 @@ For sprs, CSC columns run independently in parallel; CSR statistics scan rows
 serially to accumulate columns without converting storage.
 See [`examples/`](examples/) for complete solver examples that consume the
 operator.
+
+## Fallible operations
+
+Matrix products, column statistics, and `LazyMatrix::new` now return `Result`.
+This is a breaking API change: use `?` to propagate errors, or unwrap results
+when using an in-memory backend. Existing in-memory backends use
+`std::convert::Infallible`; storage backends can return read and decoding errors.
+
+Custom backends implement `MatrixErrorType` once and use its associated `Error`
+type across all four operator traits and `ColumnStats`. Borrowing a matrix or
+wrapping it in `LazyMatrix` preserves that error type. Shape queries, borrowed
+column and row operations, and explicit-parameter construction remain infallible.
+Dimension mismatches still panic. After a failed reusable-output product, the
+output may be partial and must be discarded or overwritten by a successful call.
+
+`ColumnStats::normalization_stats` computes the optional centers and raw scales
+as a `NormalizationStats<F>` pair. Its default dispatches to individual
+statistics. Storage backends can override it to share scans; `LazyMatrix::new`
+then replaces exact zero scales with one, preserving nonfinite values.
+
+## Out-of-core matrices
+
+A borrowed ndarray view can refer to a memory-mapped file. The `ndarray_mmap`
+example creates a private temporary `.npy` file in column-major order, fills it
+through a writable mapping, and normalizes a read-only `ArrayView2` without
+allocating an owned matrix:
+
+```sh
+cargo run --locked --release --example ndarray_mmap --features ndarray -- 10000 32
+```
+
+This example requires ndarray 0.17. Memory mappings depend on the backing file
+remaining unmodified while views exist, including by other processes. Mapping a
+file lets the OS manage page residency; it does not impose a resident-memory
+limit. Column-major storage keeps this backend's column-statistics scans
+contiguous.
+
+The `zarrs` feature supplies `ZarrMatrix` for synchronous, two-dimensional Zarr
+arrays with `f32` or `f64` elements. Enable zarrs 0.22 in your direct dependency
+as well. The adapter supports Rust 1.87 and does not select an ndarray backend.
+
+```rust
+use std::sync::Arc;
+use lazymatrix::{Centering, LazyMatrix, MatVec, Normalization, Scaling, ZarrMatrix};
+use zarrs::{array::Array, filesystem::FilesystemStore};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let store = Arc::new(FilesystemStore::new("data.zarr")?);
+    let array = Array::open(store, "/matrix")?;
+    let matrix = ZarrMatrix::<_, f64>::try_new(array)?;
+    let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd))?;
+    let result = lazy.matvec(&vec![1.0; lazy.ncols()])?;
+    println!("{} rows", result.len());
+    Ok(())
+}
+```
+
+Each product reads one chunk at a time. Normalization uses zero scans when
+inactive, one when sufficient, and at most two otherwise. Missing chunks retain
+the configured fill value, including nonzero or nonfinite values. Partial edge
+chunks contribute only entries inside the array. The array must remain unchanged
+throughout normalization and subsequent use; the adapter does not provide
+snapshot isolation.
+
+Allocating products use `Vec<F>`. Reusable-output products accept the existing
+vector-view capabilities, including enabled backend vector types. The adapter
+provides no borrowed columns or rows. Working vectors and column statistics stay
+in RAM, together with chunk buffers and codec workspaces. Choose chunks that fit
+in memory; for sharded arrays, the relevant bound is the outer storage chunk.
+There is no byte budget, cache, prefetching, or parallel chunk scanning.
+
+Filesystem and gzip support are enabled by this crate. Additional codecs can be
+enabled through your direct zarrs dependency. An unsupported codec is reported
+when zarrs opens the array.
+
+The self-contained filesystem example creates data chunk by chunk:
+
+```sh
+cargo run --locked --release --example zarrs_chunked --features zarrs -- 10000 32
+```
+
+Both examples accept optional row and column counts and print operation timings.
+For larger-than-RAM measurements, first build the examples, then run the binaries
+with GNU time installed:
+
+```sh
+cargo build --locked --release --examples --features ndarray,zarrs
+env time -v target/release/ndarray_mmap 1000000 256
+env time -v target/release/zarrs_chunked 1000000 256
+```
+
+Increase dimensions so `rows * cols * 8` exceeds available RAM, while vectors and
+chunks still fit. Set `TMPDIR` to a directory on disk and account for temporary
+disk space. Record peak RSS and timings separately from correctness tests, and
+distinguish page-cache effects from disk throughput: these examples generate
+their own files before reading them, so a run on data smaller than RAM is not a
+cold-I/O benchmark. CI uses small fixtures and verifies chunk-read counts without
+allocating a larger-than-RAM dataset.
 
 ## License
 

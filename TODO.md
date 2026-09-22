@@ -4,6 +4,16 @@ This file records design work identified during the initial API audit. The
 crate should expose normalized matrices and their storage capabilities; solver
 state and solver-specific update logic belong in consuming crates.
 
+## Out-of-core storage
+
+- [x] Demonstrate memory-mapped ndarray views with a private `.npy` file.
+- [x] Make products, column statistics, and computed normalization fallible,
+      sharing each backend's error type through `MatrixErrorType`.
+- [x] Add synchronous zarrs 0.22 products and all normalization options, with
+      serial chunk reads and at most two scans for computed normalization.
+- [ ] Measure cold-I/O throughput and peak memory on larger-than-RAM inputs
+      before adding chunk caching, prefetching, async reads, or stricter budgets.
+
 ## Foundation
 
 - [x] Add an orientation-independent `MatrixShape` trait.

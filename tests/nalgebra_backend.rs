@@ -74,7 +74,7 @@ fn nalgebra_sparse_rows_borrow_original_storage() {
 fn nalgebra_strided_views_are_borrowed() {
     let design_storage = [1.0, 10.0, 2.0, 20.0, 3.0, 30.0, 4.0, 40.0];
     let design = DMatrixView::<_, Dyn, Dyn>::from_slice_with_strides(&design_storage, 4, 2, 2, 1);
-    let lazy = LazyMatrix::new(design, Normalization::new(Centering::Mean, Scaling::L2));
+    let lazy = LazyMatrix::new(design, Normalization::new(Centering::Mean, Scaling::L2)).unwrap();
 
     let vector_storage = [1.0, -99.0, 2.0, -99.0, 3.0, -99.0, 4.0];
     let vector = DVectorView::<_, Dyn, Dyn>::from_slice_with_strides(&vector_storage, 4, 2, 1);

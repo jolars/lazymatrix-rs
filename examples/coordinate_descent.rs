@@ -176,7 +176,7 @@ where
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (nrows, ncols, density) = (120, 12, 0.25);
     let mut rng = ChaCha8Rng::seed_from_u64(0xC0DEC0DE);
     let mut triplets = Vec::new();
@@ -187,8 +187,8 @@ fn main() {
             }
         }
     }
-    let data = SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &triplets).unwrap();
-    let matrix = LazyMatrix::new(data, Normalization::new(Centering::Mean, Scaling::Sd));
+    let data = SparseColMat::<usize, f64>::try_new_from_triplets(nrows, ncols, &triplets)?;
+    let matrix = LazyMatrix::new(data, Normalization::new(Centering::Mean, Scaling::Sd))?;
 
     let beta_star = Col::from_fn(ncols, |j| match j {
         0 => 2.0,
@@ -198,7 +198,7 @@ fn main() {
         _ => 0.0,
     });
     let mut y: Vec<f64> = {
-        let signal = matrix.matvec(&beta_star);
+        let signal = matrix.matvec(&beta_star)?;
         (0..nrows).map(|i| signal[i]).collect()
     };
     for value in &mut y {
@@ -231,4 +231,5 @@ fn main() {
     for j in 0..ncols {
         println!("  {j:>2}  {:>8.4}  {:>8.4}", beta_star[j], result.beta[j]);
     }
+    Ok(())
 }

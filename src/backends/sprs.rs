@@ -44,7 +44,7 @@ where
     X: VectorView<F>,
     Y: VectorViewMut<F>,
 {
-    fn matvec_into(&self, x: &X, out: &mut Y) {
+    fn matvec_into(&self, x: &X, out: &mut Y) -> Result<(), Self::Error> {
         assert_eq!(self.cols(), x.len(), "matvec_into: dimension mismatch");
         assert_eq!(
             self.rows(),
@@ -66,6 +66,7 @@ where
                 }
             }
         }
+        Ok(())
     }
 }
 
@@ -80,7 +81,7 @@ where
     X: VectorView<F>,
     Y: VectorViewMut<F>,
 {
-    fn mat_transpose_vec_into(&self, x: &X, out: &mut Y) {
+    fn mat_transpose_vec_into(&self, x: &X, out: &mut Y) -> Result<(), Self::Error> {
         assert_eq!(
             self.rows(),
             x.len(),
@@ -91,7 +92,8 @@ where
             out.len(),
             "mat_transpose_vec_into: output dimension mismatch"
         );
-        self.transpose_view().matvec_into(x, out);
+        self.transpose_view().matvec_into(x, out)?;
+        Ok(())
     }
 }
 
@@ -106,10 +108,10 @@ macro_rules! allocating_products {
             IS: Deref<Target = [I]>,
             DS: Deref<Target = [F]>,
         {
-            fn matvec(&self, x: &$vector) -> $vector {
+            fn matvec(&self, x: &$vector) -> Result<$vector, Self::Error> {
                 let mut out = $zeros(self.rows());
-                self.matvec_into(x, &mut out);
-                out
+                self.matvec_into(x, &mut out)?;
+                Ok(out)
             }
         }
 
@@ -122,10 +124,10 @@ macro_rules! allocating_products {
             IS: Deref<Target = [I]>,
             DS: Deref<Target = [F]>,
         {
-            fn mat_transpose_vec(&self, x: &$vector) -> $vector {
+            fn mat_transpose_vec(&self, x: &$vector) -> Result<$vector, Self::Error> {
                 let mut out = $zeros(self.cols());
-                self.mat_transpose_vec_into(x, &mut out);
-                out
+                self.mat_transpose_vec_into(x, &mut out)?;
+                Ok(out)
             }
         }
     };
@@ -134,3 +136,14 @@ macro_rules! allocating_products {
 allocating_products!(Vec<F>, |n| vec![F::zero(); n]);
 #[cfg(feature = "ndarray_all")]
 allocating_products!(ndarray::Array1<F>, ndarray::Array1::zeros);
+
+impl<F, I, IP, IS, DS, Iptr> crate::MatrixErrorType for CsMatBase<F, I, IP, IS, DS, Iptr>
+where
+    I: SpIndex,
+    Iptr: SpIndex,
+    IP: Deref<Target = [Iptr]>,
+    IS: Deref<Target = [I]>,
+    DS: Deref<Target = [F]>,
+{
+    type Error = std::convert::Infallible;
+}

@@ -1,13 +1,14 @@
 //! Backend-agnostic trait surface for [`LazyMatrix`](crate::LazyMatrix).
 //!
-//! The traits split into three groups:
+//! The traits separate numeric operations from matrix capabilities:
 //!
 //! * [`Scalar`] — the numeric element type, a blanket-implemented bundle of
 //!   `num-traits` bounds.
+//! * [`MatrixErrorType`] — the shared operational error type for a backend.
 //! * [`MatrixShape`], [`MatVec`] / [`MatTransposeVec`], and their reusable-output
 //!   [`MatVecInto`] / [`MatTransposeVecInto`] counterparts — the matrix-free
 //!   linear-operator interface, implemented both by concrete backend matrices
-//!   and by [`LazyMatrix`](crate::LazyMatrix) itself.
+//!   and by [`LazyMatrix`](crate::LazyMatrix) itself. Products return `Result`.
 //! * Solver-facing vector algebra ([`DotProduct`], [`L2Norm`],
 //!   [`ScaledAddAssign`], and [`ScaleAssign`]).
 //! * The five normalization-specific *vector* traits ([`ElemDivAssign`], [`DotSlice`],
@@ -16,7 +17,7 @@
 //!   phrased as a backend vector against a coefficient slice `&[F]`, which is
 //!   exactly the shape the centering/scaling math needs.
 //! * [`ColumnStats`] — column statistics computed directly over a (possibly
-//!   sparse) backend matrix, used by the `normalized` constructor.
+//!   sparse) backend matrix, used by [`LazyMatrix::new`](crate::LazyMatrix::new).
 //! * [`VectorView`] / [`VectorViewMut`] — storage-independent borrowed vector
 //!   access, including strided backend views.
 //! * [`RawColumn`] / [`RawColumns`] and [`LogicalColumn`] / [`Columns`] — the
@@ -41,9 +42,11 @@ mod rows;
 mod stats;
 mod vectors;
 
-pub use crate::normalization::{Centering, Normalization, Scaling};
+pub use crate::normalization::{Centering, Normalization, NormalizationStats, Scaling};
 pub use columns::{Columns, LogicalColumn, RawColumn, RawColumns, SparseColumns};
-pub use operator::{MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape};
+pub use operator::{
+    MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixErrorType, MatrixShape,
+};
 pub use rows::SparseRows;
 pub use stats::ColumnStats;
 pub use vectors::{

@@ -5,7 +5,8 @@ faer_versions=(faer_v0_22 faer_v0_23 faer_v0_24)
 nalgebra_versions=(nalgebra_v0_32 nalgebra_v0_33 nalgebra_v0_34 nalgebra_v0_35)
 ndarray_versions=(ndarray_v0_15 ndarray_v0_16 ndarray_v0_17)
 sprs_versions=(sprs_v0_11)
-versions=("${faer_versions[@]}" "${nalgebra_versions[@]}" "${ndarray_versions[@]}" "${sprs_versions[@]}")
+zarrs_versions=(zarrs_v0_22)
+versions=("${faer_versions[@]}" "${nalgebra_versions[@]}" "${ndarray_versions[@]}" "${sprs_versions[@]}" "${zarrs_versions[@]}")
 
 test_features() {
     cargo test --locked --no-default-features "$@"
@@ -18,11 +19,12 @@ test_version() {
 
 test_core() {
     test_features
-    for features in parallel faer nalgebra ndarray sprs \
+    for features in parallel faer nalgebra ndarray sprs zarrs \
         faer,nalgebra,ndarray,sprs faer,nalgebra,ndarray,sprs,parallel \
         faer_v0_22,nalgebra_v0_32,ndarray_v0_15,sprs \
         faer_v0_22,nalgebra_v0_32,ndarray_v0_15,sprs,parallel \
-        sprs,ndarray_v0_16 sprs,ndarray_v0_16,parallel; do
+        sprs,ndarray_v0_16 sprs,ndarray_v0_16,parallel \
+        zarrs,ndarray_v0_15 zarrs,ndarray_v0_16 zarrs,ndarray_v0_17; do
         test_features --features "$features"
     done
     test_features --all-features
@@ -43,6 +45,7 @@ test_selection() {
     test_pairs "${nalgebra_versions[@]}"
     test_pairs "${ndarray_versions[@]}"
     test_pairs "${sprs_versions[@]}"
+    test_pairs "${zarrs_versions[@]}"
 }
 
 check_msrv() {

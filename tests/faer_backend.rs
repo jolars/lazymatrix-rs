@@ -112,7 +112,7 @@ fn faer_sparse_rows_preserve_unsorted_entries() {
 fn faer_strided_views_are_borrowed() {
     let design_storage = Mat::from_fn(2, 4, |i, j| (i * 4 + j + 1) as f64);
     let design = design_storage.as_ref().transpose();
-    let lazy = LazyMatrix::new(design, Normalization::new(Centering::Mean, Scaling::L2));
+    let lazy = LazyMatrix::new(design, Normalization::new(Centering::Mean, Scaling::L2)).unwrap();
 
     let vector_storage = Mat::from_fn(2, 4, |i, j| (i + j + 1) as f64);
     let vector = vector_storage.row(1).transpose();

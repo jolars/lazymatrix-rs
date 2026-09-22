@@ -27,8 +27,8 @@ use crate::{
 ///
 /// let x = CsMat::new_csc((3, 2), vec![0, 2, 3], vec![0, 2, 1], vec![1.0, 3.0, 2.0]);
 /// let csc = SprsCsc::try_new(x.view()).unwrap();
-/// let lazy = LazyMatrix::new(csc, Normalization::new(Centering::Mean, Scaling::Sd));
-/// assert_eq!(lazy.matvec(&vec![1.0, -1.0]).len(), 3);
+/// let lazy = LazyMatrix::new(csc, Normalization::new(Centering::Mean, Scaling::Sd)).unwrap();
+/// assert_eq!(lazy.matvec(&vec![1.0, -1.0]).unwrap().len(), 3);
 /// assert_eq!(lazy.sparse_column(0).row_indices(), &[0, 2]);
 /// # }
 /// ```
@@ -166,58 +166,69 @@ where
 }
 
 impl<M: MatVec<V>, V> MatVec<V> for SprsCsc<M> {
-    fn matvec(&self, x: &V) -> V {
+    fn matvec(&self, x: &V) -> Result<V, Self::Error> {
         self.inner.matvec(x)
     }
 }
 
 impl<M: MatTransposeVec<V>, V> MatTransposeVec<V> for SprsCsc<M> {
-    fn mat_transpose_vec(&self, x: &V) -> V {
+    fn mat_transpose_vec(&self, x: &V) -> Result<V, Self::Error> {
         self.inner.mat_transpose_vec(x)
     }
 }
 
 impl<M: MatVecInto<X, Y>, X, Y> MatVecInto<X, Y> for SprsCsc<M> {
-    fn matvec_into(&self, x: &X, out: &mut Y) {
-        self.inner.matvec_into(x, out);
+    fn matvec_into(&self, x: &X, out: &mut Y) -> Result<(), Self::Error> {
+        self.inner.matvec_into(x, out)
     }
 }
 
 impl<M: MatTransposeVecInto<X, Y>, X, Y> MatTransposeVecInto<X, Y> for SprsCsc<M> {
-    fn mat_transpose_vec_into(&self, x: &X, out: &mut Y) {
-        self.inner.mat_transpose_vec_into(x, out);
+    fn mat_transpose_vec_into(&self, x: &X, out: &mut Y) -> Result<(), Self::Error> {
+        self.inner.mat_transpose_vec_into(x, out)
     }
 }
 
 impl<M: ColumnStats<F>, F: Scalar> ColumnStats<F> for SprsCsc<M> {
-    fn col_means(&self) -> Vec<F> {
+    fn normalization_stats(
+        &self,
+        spec: crate::Normalization,
+    ) -> Result<crate::NormalizationStats<F>, Self::Error> {
+        self.inner.normalization_stats(spec)
+    }
+
+    fn col_means(&self) -> Result<Vec<F>, Self::Error> {
         self.inner.col_means()
     }
-    fn col_sds(&self) -> Vec<F> {
+    fn col_sds(&self) -> Result<Vec<F>, Self::Error> {
         self.inner.col_sds()
     }
-    fn col_mins(&self) -> Vec<F> {
+    fn col_mins(&self) -> Result<Vec<F>, Self::Error> {
         self.inner.col_mins()
     }
-    fn col_ranges(&self) -> Vec<F> {
+    fn col_ranges(&self) -> Result<Vec<F>, Self::Error> {
         self.inner.col_ranges()
     }
-    fn col_maxabs(&self) -> Vec<F> {
+    fn col_maxabs(&self) -> Result<Vec<F>, Self::Error> {
         self.inner.col_maxabs()
     }
-    fn col_l1(&self) -> Vec<F> {
+    fn col_l1(&self) -> Result<Vec<F>, Self::Error> {
         self.inner.col_l1()
     }
-    fn col_l2(&self) -> Vec<F> {
+    fn col_l2(&self) -> Result<Vec<F>, Self::Error> {
         self.inner.col_l2()
     }
-    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l1_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         self.inner.col_l1_centered(centers)
     }
-    fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l2_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         self.inner.col_l2_centered(centers)
     }
-    fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_maxabs_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         self.inner.col_maxabs_centered(centers)
     }
+}
+
+impl<M: crate::MatrixErrorType> crate::MatrixErrorType for SprsCsc<M> {
+    type Error = M::Error;
 }

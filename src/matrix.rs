@@ -1,5 +1,5 @@
 use crate::column::{LazyColumn, LazySparseColumn, SparseColumnRef};
-use crate::normalization::{Centering, Normalization, Scaling};
+use crate::normalization::Normalization;
 use crate::traits::{
     ColumnStats, Columns, DotSlice, ElemDivAssign, MatTransposeVec, MatTransposeVecInto, MatVec,
     MatVecInto, MatrixShape, RawColumns, Scalar, ScaledSubSlice, SparseColumns, SubScalarAssign,
@@ -136,32 +136,16 @@ where
     /// zero) is replaced with `1`, so the resulting operator never divides by
     /// zero. Nonfinite statistics retain their IEEE values and propagate through
     /// subsequent operations.
-    pub fn new(data: M, spec: Normalization) -> Self {
-        let centers = match spec.center {
-            Centering::None => None,
-            Centering::Mean => Some(data.col_means()),
-            Centering::Min => Some(data.col_mins()),
-        };
-
-        let scales = match spec.scale {
-            Scaling::None => None,
-            Scaling::Sd => Some(replace_zero_scales(data.col_sds())),
-            Scaling::L1 => Some(replace_zero_scales(match &centers {
-                Some(c) => data.col_l1_centered(c),
-                None => data.col_l1(),
-            })),
-            Scaling::MaxAbs => Some(replace_zero_scales(match &centers {
-                Some(c) => data.col_maxabs_centered(c),
-                None => data.col_maxabs(),
-            })),
-            Scaling::L2 => Some(replace_zero_scales(match &centers {
-                Some(c) => data.col_l2_centered(c),
-                None => data.col_l2(),
-            })),
-            Scaling::Range => Some(replace_zero_scales(data.col_ranges())),
-        };
-
-        Self::from_parts(data, centers, scales)
+    ///
+    /// # Errors
+    /// Returns the backend error if computing normalization statistics fails.
+    pub fn new(data: M, spec: Normalization) -> Result<Self, M::Error> {
+        let (centers, scales) = data.normalization_stats(spec)?;
+        Ok(Self::from_parts(
+            data,
+            centers,
+            scales.map(replace_zero_scales),
+        ))
     }
 }
 
@@ -217,7 +201,7 @@ where
     V: Clone + ElemDivAssign<F> + DotSlice<F> + SubScalarAssign<F>,
 {
     /// `X̃ v = X (S⁻¹ v) − 1 · (cᵀ S⁻¹ v)`.
-    fn matvec(&self, v: &V) -> V {
+    fn matvec(&self, v: &V) -> Result<V, Self::Error> {
         // The forward op clones `v` because it mutates it into `S⁻¹v`. The
         // transpose op below does NOT clone `u`: it reads `Σu` first, then only
         // reads `u` through the backend product.
@@ -225,11 +209,11 @@ where
         if let Some(s) = &self.scales {
             w.elem_div_assign(s); // w = S⁻¹ v
         }
-        let mut y = self.data.matvec(&w); // y = X w   (sparse; no X − 1cᵀ)
+        let mut y = self.data.matvec(&w)?;
         if let Some(c) = &self.centers {
             y.sub_scalar_assign(w.dot_slice(c)); // y −= 1 · (cᵀ w)
         }
-        y
+        Ok(y)
     }
 }
 
@@ -241,20 +225,21 @@ where
     Y: SubScalarAssign<F>,
 {
     /// `out = X̃ v = X (S⁻¹ v) − 1 · (cᵀ S⁻¹ v)`.
-    fn matvec_into(&self, v: &X, out: &mut Y) {
+    fn matvec_into(&self, v: &X, out: &mut Y) -> Result<(), Self::Error> {
         if let Some(s) = &self.scales {
             let mut w = v.clone();
             w.elem_div_assign(s);
-            self.data.matvec_into(&w, out);
+            self.data.matvec_into(&w, out)?;
             if let Some(c) = &self.centers {
                 out.sub_scalar_assign(w.dot_slice(c));
             }
         } else {
-            self.data.matvec_into(v, out);
+            self.data.matvec_into(v, out)?;
             if let Some(c) = &self.centers {
                 out.sub_scalar_assign(v.dot_slice(c));
             }
         }
+        Ok(())
     }
 }
 
@@ -265,20 +250,20 @@ where
     V: SumEntries<F> + ScaledSubSlice<F> + ElemDivAssign<F>,
 {
     /// `X̃ᵀ u = S⁻¹ (Xᵀ u − c · Σu)`.
-    fn mat_transpose_vec(&self, u: &V) -> V {
+    fn mat_transpose_vec(&self, u: &V) -> Result<V, Self::Error> {
         let total = if self.centers.is_some() {
             u.sum_entries()
         } else {
             F::zero()
         };
-        let mut t = self.data.mat_transpose_vec(u); // t = Xᵀ u   (sparse)
+        let mut t = self.data.mat_transpose_vec(u)?;
         if let Some(c) = &self.centers {
             t.scaled_sub_slice(total, c); // t −= Σu · c
         }
         if let Some(s) = &self.scales {
             t.elem_div_assign(s); // t = S⁻¹ t
         }
-        t
+        Ok(t)
     }
 }
 
@@ -290,18 +275,23 @@ where
     Y: ScaledSubSlice<F> + ElemDivAssign<F>,
 {
     /// `out = X̃ᵀ u = S⁻¹ (Xᵀ u − c · Σu)`.
-    fn mat_transpose_vec_into(&self, u: &X, out: &mut Y) {
+    fn mat_transpose_vec_into(&self, u: &X, out: &mut Y) -> Result<(), Self::Error> {
         let total = if self.centers.is_some() {
             u.sum_entries()
         } else {
             F::zero()
         };
-        self.data.mat_transpose_vec_into(u, out);
+        self.data.mat_transpose_vec_into(u, out)?;
         if let Some(c) = &self.centers {
             out.scaled_sub_slice(total, c);
         }
         if let Some(s) = &self.scales {
             out.elem_div_assign(s);
         }
+        Ok(())
     }
+}
+
+impl<M: crate::MatrixErrorType, F> crate::MatrixErrorType for LazyMatrix<M, F> {
+    type Error = M::Error;
 }

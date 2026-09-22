@@ -1,3 +1,10 @@
+/// Computed column centers and raw scales, respectively.
+///
+/// An inactive normalization component is `None`. Present vectors have one
+/// entry per column. Raw scales may be zero; [`crate::LazyMatrix::new`] replaces
+/// exact zeros with one while preserving nonfinite values.
+pub type NormalizationStats<F> = (Option<Vec<F>>, Option<Vec<F>>);
+
 /// How to center each column.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Centering {

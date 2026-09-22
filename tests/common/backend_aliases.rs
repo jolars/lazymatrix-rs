@@ -82,3 +82,6 @@ pub(crate) use faer;
 
 #[cfg(feature = "faer_v0_24")]
 pub(crate) use faer_traits;
+
+#[cfg(feature = "zarrs_v0_22")]
+pub(crate) use zarrs;

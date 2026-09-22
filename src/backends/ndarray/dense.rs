@@ -42,10 +42,10 @@ where
     F: Scalar,
     S: Data<Elem = F>,
 {
-    fn matvec(&self, x: &Array1<F>) -> Array1<F> {
+    fn matvec(&self, x: &Array1<F>) -> Result<Array1<F>, Self::Error> {
         let mut out = Array1::zeros(self.nrows());
-        self.matvec_into(x, &mut out);
-        out
+        self.matvec_into(x, &mut out)?;
+        Ok(out)
     }
 }
 
@@ -54,10 +54,10 @@ where
     F: Scalar,
     S: Data<Elem = F>,
 {
-    fn mat_transpose_vec(&self, x: &Array1<F>) -> Array1<F> {
+    fn mat_transpose_vec(&self, x: &Array1<F>) -> Result<Array1<F>, Self::Error> {
         let mut out = Array1::zeros(self.ncols());
-        self.mat_transpose_vec_into(x, &mut out);
-        out
+        self.mat_transpose_vec_into(x, &mut out)?;
+        Ok(out)
     }
 }
 
@@ -68,7 +68,11 @@ where
     X: Data<Elem = F>,
     Y: DataMut<Elem = F>,
 {
-    fn matvec_into(&self, x: &ArrayBase<X, Ix1>, out: &mut ArrayBase<Y, Ix1>) {
+    fn matvec_into(
+        &self,
+        x: &ArrayBase<X, Ix1>,
+        out: &mut ArrayBase<Y, Ix1>,
+    ) -> Result<(), Self::Error> {
         assert_eq!(self.ncols(), x.len(), "matvec_into: dimension mismatch");
         assert_eq!(
             self.nrows(),
@@ -76,6 +80,7 @@ where
             "matvec_into: output dimension mismatch"
         );
         general_mat_vec_mul(F::one(), self, x, F::zero(), out);
+        Ok(())
     }
 }
 
@@ -86,7 +91,11 @@ where
     X: Data<Elem = F>,
     Y: DataMut<Elem = F>,
 {
-    fn mat_transpose_vec_into(&self, x: &ArrayBase<X, Ix1>, out: &mut ArrayBase<Y, Ix1>) {
+    fn mat_transpose_vec_into(
+        &self,
+        x: &ArrayBase<X, Ix1>,
+        out: &mut ArrayBase<Y, Ix1>,
+    ) -> Result<(), Self::Error> {
         assert_eq!(
             self.nrows(),
             x.len(),
@@ -98,6 +107,7 @@ where
             "mat_transpose_vec_into: output dimension mismatch"
         );
         general_mat_vec_mul(F::one(), &self.t(), x, F::zero(), out);
+        Ok(())
     }
 }
 
@@ -106,17 +116,17 @@ where
     F: Scalar + MaybeSend + MaybeSync,
     S: Data<Elem = F> + MaybeSync,
 {
-    fn col_means(&self) -> Vec<F> {
+    fn col_means(&self) -> Result<Vec<F>, Self::Error> {
         let n = F::from_usize(self.nrows()).unwrap();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             self.column(j).iter().copied().sum::<F>() / n
-        })
+        }))
     }
 
-    fn col_sds(&self) -> Vec<F> {
-        let centers = self.col_means();
+    fn col_sds(&self) -> Result<Vec<F>, Self::Error> {
+        let centers = self.col_means()?;
         let n = F::from_usize(self.nrows()).unwrap();
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             (self
                 .column(j)
                 .iter()
@@ -127,44 +137,46 @@ where
                 .sum::<F>()
                 / n)
                 .sqrt()
-        })
+        }))
     }
 
-    fn col_mins(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| min_or_nan(self.column(j).iter().copied()))
+    fn col_mins(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
+            min_or_nan(self.column(j).iter().copied())
+        }))
     }
 
-    fn col_ranges(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_ranges(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             range_or_nan(self.column(j).iter().copied())
-        })
+        }))
     }
 
-    fn col_maxabs(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_maxabs(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             max_or_nan(self.column(j).iter().map(|x| x.abs()))
-        })
+        }))
     }
 
-    fn col_l1(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_l1(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             self.column(j).iter().map(|x| x.abs()).sum()
-        })
+        }))
     }
 
-    fn col_l2(&self) -> Vec<F> {
-        collect_columns(self.ncols(), |j| {
+    fn col_l2(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(collect_columns(self.ncols(), |j| {
             self.column(j).iter().map(|&x| x * x).sum::<F>().sqrt()
-        })
+        }))
     }
 
-    fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l2_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
             "col_l2_centered: length mismatch"
         );
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             self.column(j)
                 .iter()
                 .map(|&value| {
@@ -173,35 +185,39 @@ where
                 })
                 .sum::<F>()
                 .sqrt()
-        })
+        }))
     }
 
-    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l1_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
             "col_l1_centered: length mismatch"
         );
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             self.column(j)
                 .iter()
                 .map(|&value| (value - centers[j]).abs())
                 .sum()
-        })
+        }))
     }
 
-    fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_maxabs_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.ncols(),
             "col_maxabs_centered: length mismatch"
         );
-        collect_columns(self.ncols(), |j| {
+        Ok(collect_columns(self.ncols(), |j| {
             max_or_nan(
                 self.column(j)
                     .iter()
                     .map(|&value| (value - centers[j]).abs()),
             )
-        })
+        }))
     }
+}
+
+impl<S: Data> crate::MatrixErrorType for ArrayBase<S, Ix2> {
+    type Error = std::convert::Infallible;
 }

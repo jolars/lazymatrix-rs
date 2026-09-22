@@ -54,20 +54,20 @@ where
     IS: Deref<Target = [I]>,
     DS: Deref<Target = [F]>,
 {
-    fn col_means(&self) -> Vec<F> {
+    fn col_means(&self) -> Result<Vec<F>, Self::Error> {
         let n = F::from_usize(self.rows()).unwrap();
-        reduce_columns(
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |_, sum, v| sum + v,
             |_, sum, _| sum / n,
-        )
+        ))
     }
 
-    fn col_sds(&self) -> Vec<F> {
-        let means = self.col_means();
+    fn col_sds(&self) -> Result<Vec<F>, Self::Error> {
+        let means = self.col_means()?;
         let n = F::from_usize(self.rows()).unwrap();
-        reduce_columns(
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |j, sum, v| {
@@ -78,11 +78,11 @@ where
                 let missing = F::from_usize(missing).unwrap();
                 ((sum + missing * means[j] * means[j]) / n).sqrt()
             },
-        )
+        ))
     }
 
-    fn col_mins(&self) -> Vec<F> {
-        reduce_columns(
+    fn col_mins(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(reduce_columns(
             self.view(),
             |_| None,
             |_, minimum: Option<F>, v| Some(min_or_nan(minimum.into_iter().chain([v]))),
@@ -93,11 +93,11 @@ where
                         .chain((missing > 0).then_some(F::zero())),
                 )
             },
-        )
+        ))
     }
 
-    fn col_ranges(&self) -> Vec<F> {
-        reduce_columns(
+    fn col_ranges(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(reduce_columns(
             self.view(),
             |_| None,
             |_, extrema: Option<(F, F)>, v| {
@@ -117,57 +117,57 @@ where
                         .chain((missing > 0).then_some(F::zero())),
                 )
             },
-        )
+        ))
     }
 
-    fn col_maxabs(&self) -> Vec<F> {
-        reduce_columns(
+    fn col_maxabs(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |_, maximum, v| max_or_nan([maximum, v.abs()].into_iter()),
             |_, maximum, _| maximum,
-        )
+        ))
     }
 
-    fn col_l1(&self) -> Vec<F> {
-        reduce_columns(
+    fn col_l1(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |_, sum, v| sum + v.abs(),
             |_, sum, _| sum,
-        )
+        ))
     }
 
-    fn col_l2(&self) -> Vec<F> {
-        reduce_columns(
+    fn col_l2(&self) -> Result<Vec<F>, Self::Error> {
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |_, sum, v| sum + v * v,
             |_, sum, _| sum.sqrt(),
-        )
+        ))
     }
 
-    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l1_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.cols(),
             "col_l1_centered: length mismatch"
         );
-        reduce_columns(
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |j, sum, v| sum + (v - centers[j]).abs(),
             |j, sum, missing| sum + F::from_usize(missing).unwrap() * centers[j].abs(),
-        )
+        ))
     }
 
-    fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_l2_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.cols(),
             "col_l2_centered: length mismatch"
         );
-        reduce_columns(
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |j, sum, v| {
@@ -177,16 +177,16 @@ where
             |j, sum, missing| {
                 (sum + F::from_usize(missing).unwrap() * centers[j] * centers[j]).sqrt()
             },
-        )
+        ))
     }
 
-    fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+    fn col_maxabs_centered(&self, centers: &[F]) -> Result<Vec<F>, Self::Error> {
         assert_eq!(
             centers.len(),
             self.cols(),
             "col_maxabs_centered: length mismatch"
         );
-        reduce_columns(
+        Ok(reduce_columns(
             self.view(),
             |_| F::zero(),
             |j, maximum, v| max_or_nan([maximum, (v - centers[j]).abs()].into_iter()),
@@ -195,6 +195,6 @@ where
                     std::iter::once(maximum).chain((missing > 0).then_some(centers[j].abs())),
                 )
             },
-        )
+        ))
     }
 }

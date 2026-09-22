@@ -15,7 +15,7 @@ keywords = ["matrix", "sparse", "linear-algebra", "centering", "scaling"]
 categories = ["mathematics", "science", "algorithms"]
 
 [package.metadata.docs.rs]
-features = ["faer", "nalgebra", "ndarray", "sprs", "parallel"]
+features = ["faer", "nalgebra", "ndarray", "sprs", "zarrs", "parallel"]
 
 [dependencies]
 num-traits = { version = "0.2", default-features = false, features = ["std"] }
@@ -48,9 +48,12 @@ faer_traits_0_23 = { package = "faer-traits", version = "0.23", optional = true,
 faer-traits = { version = "0.24", optional = true, default-features = false }
 rayon = { version = "1", optional = true }
 sprs = { version = "0.11.4", optional = true, default-features = false }
+zarrs = { version = "0.22.10", optional = true, default-features = false, features = ["filesystem", "gzip"] }
 
 [features]
 default = []
+zarrs = ["zarrs_v0_22"]
+zarrs_v0_22 = ["zarrs_all", "dep:zarrs"]
 sprs = ["sprs_v0_11"]
 sprs_v0_11 = ["sprs_all", "dep:sprs"]
 nalgebra = ["nalgebra_v0_35"]
@@ -73,6 +76,7 @@ nalgebra_all = []
 ndarray_all = []
 faer_all = []
 sprs_all = []
+zarrs_all = []
 
 [dev-dependencies]
 approx = "0.5"
@@ -82,6 +86,17 @@ rand = { version = "0.10", default-features = false, features = [
     "std_rng",
 ] }
 rand_chacha = "0.10"
+memmap2 = "0.9"
+ndarray-npy = { version = "0.10", default-features = false }
+tempfile = "3"
+
+[[example]]
+name = "ndarray_mmap"
+required-features = ["ndarray_v0_17"]
+
+[[example]]
+name = "zarrs_chunked"
+required-features = ["zarrs_all"]
 
 [[example]]
 name = "least_squares_gd"
