@@ -2,7 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/jolars/versionary/main/schemas/config.json",
   "version": 1,
   "release-type": "rust",
-  "allow-stable-major": true,
+  "allow-stable-major": false,
   "include-commit-authors": true,
   "release-reference-comments": "best-effort"
 }
