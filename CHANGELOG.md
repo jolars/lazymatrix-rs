@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/jolars/lazymatrix-rs/compare/v0.2.0...v0.3.0) (2026-09-22)
+
+### Breaking changes
+- add out-of-core matrix support ([`c99caa6`](https://github.com/jolars/lazymatrix-rs/commit/c99caa6b79b284f03afc0ce2e0e4b3ffdce7355b))
+- add version-specific backend features ([`b86950e`](https://github.com/jolars/lazymatrix-rs/commit/b86950e4fe35bb5a231a9bfb0c6eeb317ab4b602))
+
+### Features
+- add out-of-core matrix support ([`c99caa6`](https://github.com/jolars/lazymatrix-rs/commit/c99caa6b79b284f03afc0ce2e0e4b3ffdce7355b))
+- add `SparseRows` for CSR backends ([`4114935`](https://github.com/jolars/lazymatrix-rs/commit/4114935b8d9492491eccec80f81e1d9f67437209))
+- add `sprs` backend ([`fe40fee`](https://github.com/jolars/lazymatrix-rs/commit/fe40feebef212069af87467deb4218c8f8840a5f))
+- add version-specific backend features ([`b86950e`](https://github.com/jolars/lazymatrix-rs/commit/b86950e4fe35bb5a231a9bfb0c6eeb317ab4b602))
+- add `ndarray` backend ([`231a622`](https://github.com/jolars/lazymatrix-rs/commit/231a622ba38df79bef12410b3569da19073080fb))
+
 ## [0.2.0](https://github.com/jolars/lazymatrix-rs/compare/v0.1.0...v0.2.0) (2026-09-16)
 
 ### Features
