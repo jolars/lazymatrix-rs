@@ -2,6 +2,10 @@
 //!
 //! Run with: `cargo run --example slope_primitives --features faer`
 
+#[path = "../tests/common/backend_aliases.rs"]
+mod backend_aliases;
+use backend_aliases::*;
+
 use faer::Mat;
 use faer::sparse::{SparseColMat, Triplet};
 use lazymatrix::{Columns, LazyMatrix, LogicalColumn};

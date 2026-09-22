@@ -22,6 +22,14 @@ no features enabled, the crate provides its traits and `LazyMatrix` with only
 `num-traits`; adding a backend means implementing the existing trait surface for
 a matrix/vector pair. This crate contains no FFI.
 
+Each supported backend release has a version feature, such as `faer_v0_22`.
+The unversioned `faer`, `nalgebra`, and `ndarray` features select the newest
+supported release. If feature unification enables multiple releases, implement
+only the newest enabled release. Keep crate aliases in `src/lib.rs` and
+`tests/common/backend_aliases.rs` synchronized; examples also use the latter.
+Gate shared backend code on the internal `*_all` markers. Update the version
+matrix in `scripts/test-backends.sh` and CI when adding a supported release.
+
 Integration tests are in `tests/`. The backend suites reuse
 `tests/common/runner.rs`, while `tests/cross_backend.rs` checks agreement
 between implementations. Runnable demonstrations belong in `examples/`, and
@@ -87,7 +95,8 @@ sums, update rules, or an entire solver to the crate.
 
 - `cargo build --locked` builds the dependency-light core.
 - `cargo build --all-features --locked` checks all supported backends.
-- `task test` runs the core, each backend, and the all-feature test matrix.
+- `task test` runs every backend version with and without parallelism, version
+  pairs, cross-backend comparisons, and the all-feature test matrix.
 - `task ci` runs formatting, Clippy, documentation, and all tests—the local
   equivalent of GitHub CI.
 - `cargo bench --locked --bench column_sds` runs the column-statistics
@@ -95,8 +104,11 @@ sums, update rules, or an entire solver to the crate.
 - `cargo run --locked --example coordinate_descent --features faer` runs an
   example.
 
-The repository's devenv supplies Rust 1.87, `go-task`, and the configured
-pre-commit hooks.
+The repository's devenv supplies Rust 1.89, `go-task`, and the configured
+pre-commit hooks. The package MSRV remains Rust 1.87, except for nalgebra 0.35
+(including the `nalgebra` alias), which requires Rust 1.89. Run
+`bash scripts/test-backends.sh msrv` with Rust 1.87 to check the compatible
+feature selections, including tests, examples, and benchmarks.
 
 ## Coding Style & Naming Conventions
 

@@ -30,11 +30,6 @@ tasks:
       - cargo doc --no-deps --all-features --locked
 
   test:
-    desc: Test the core, each backend, and all features.
+    desc: Test every backend version, parallelism, and version selection.
     cmds:
-      - cargo test --locked
-      - cargo test --locked --features nalgebra
-      - cargo test --locked --features faer
-      - cargo test --locked --features ndarray
-      - cargo test --locked --features ndarray,parallel
-      - cargo test --locked --all-features
+      - bash scripts/test-backends.sh

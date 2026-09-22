@@ -1,10 +1,14 @@
 #![cfg(any(
-    all(feature = "faer", feature = "nalgebra"),
-    all(feature = "faer", feature = "ndarray"),
-    all(feature = "nalgebra", feature = "ndarray"),
+    all(feature = "faer_all", feature = "nalgebra_all"),
+    all(feature = "faer_all", feature = "ndarray_all"),
+    all(feature = "nalgebra_all", feature = "ndarray_all"),
 ))]
 //! Cross-backend agreement: the same logical matrix, normalized the same way,
 //! produces matching operator outputs under each pair of enabled backends.
+
+#[path = "common/backend_aliases.rs"]
+mod backend_aliases;
+use backend_aliases::*;
 
 #[path = "common/runner.rs"]
 mod common;
@@ -14,7 +18,7 @@ use lazymatrix::{Centering, LazyMatrix, MatTransposeVec, MatVec, Normalization, 
 
 type Products = (Vec<f64>, Vec<f64>);
 
-#[cfg(feature = "faer")]
+#[cfg(feature = "faer_all")]
 fn faer_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
     use faer::Col;
     use faer::sparse::{SparseColMat, Triplet};
@@ -34,7 +38,7 @@ fn faer_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> 
     )
 }
 
-#[cfg(feature = "nalgebra")]
+#[cfg(feature = "nalgebra_all")]
 fn nalgebra_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
     use nalgebra::DVector;
     use nalgebra_sparse::{CooMatrix, CscMatrix};
@@ -54,7 +58,7 @@ fn nalgebra_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64])
     )
 }
 
-#[cfg(feature = "ndarray")]
+#[cfg(feature = "ndarray_all")]
 fn ndarray_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
     use ndarray::{Array1, Array2};
 
@@ -94,19 +98,19 @@ fn check_agreement(
     }
 }
 
-#[cfg(all(feature = "faer", feature = "nalgebra"))]
+#[cfg(all(feature = "faer_all", feature = "nalgebra_all"))]
 #[test]
 fn faer_and_nalgebra_agree() {
     check_agreement(faer_products, nalgebra_products);
 }
 
-#[cfg(all(feature = "faer", feature = "ndarray"))]
+#[cfg(all(feature = "faer_all", feature = "ndarray_all"))]
 #[test]
 fn faer_and_ndarray_agree() {
     check_agreement(faer_products, ndarray_products);
 }
 
-#[cfg(all(feature = "nalgebra", feature = "ndarray"))]
+#[cfg(all(feature = "nalgebra_all", feature = "ndarray_all"))]
 #[test]
 fn nalgebra_and_ndarray_agree() {
     check_agreement(nalgebra_products, ndarray_products);

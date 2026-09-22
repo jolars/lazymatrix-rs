@@ -14,24 +14,61 @@ readme = "README.md"
 keywords = ["matrix", "sparse", "linear-algebra", "centering", "scaling"]
 categories = ["mathematics", "science", "algorithms"]
 
+[package.metadata.docs.rs]
+features = ["faer", "nalgebra", "ndarray", "parallel"]
+
 [dependencies]
 num-traits = { version = "0.2", default-features = false, features = ["std"] }
-nalgebra = { version = "0.34", optional = true }
-nalgebra-sparse = { version = "0.11", optional = true }
+nalgebra_0_32 = { package = "nalgebra", version = "0.32", optional = true }
+nalgebra_0_33 = { package = "nalgebra", version = "0.33", optional = true }
+nalgebra_0_34 = { package = "nalgebra", version = "0.34", optional = true }
+# nalgebra 0.35 requires Rust 1.89; older version features retain the package MSRV.
+nalgebra = { version = "0.35", optional = true }
+nalgebra_sparse_0_9 = { package = "nalgebra-sparse", version = "0.9", optional = true }
+nalgebra_sparse_0_10 = { package = "nalgebra-sparse", version = "0.10", optional = true }
+nalgebra_sparse_0_11 = { package = "nalgebra-sparse", version = "0.11", optional = true }
+nalgebra-sparse = { version = "0.12", optional = true }
+ndarray_0_15 = { package = "ndarray", version = "0.15", optional = true, default-features = false, features = ["std"] }
+ndarray_0_16 = { package = "ndarray", version = "0.16", optional = true, default-features = false, features = ["std"] }
 ndarray = { version = "0.17.2", optional = true, default-features = false, features = ["std"] }
+faer_0_22 = { package = "faer", version = "0.22", optional = true, default-features = false, features = [
+    "std",
+    "linalg",
+] }
+faer_0_23 = { package = "faer", version = "0.23", optional = true, default-features = false, features = [
+    "std",
+    "linalg",
+] }
 faer = { version = "0.24", optional = true, default-features = false, features = [
     "std",
     "linalg",
 ] }
+faer_traits_0_22 = { package = "faer-traits", version = "0.22", optional = true, default-features = false }
+faer_traits_0_23 = { package = "faer-traits", version = "0.23", optional = true, default-features = false }
 faer-traits = { version = "0.24", optional = true, default-features = false }
 rayon = { version = "1", optional = true }
 
 [features]
 default = []
-nalgebra = ["dep:nalgebra", "dep:nalgebra-sparse"]
-ndarray = ["dep:ndarray"]
-faer = ["dep:faer", "dep:faer-traits"]
-parallel = ["dep:rayon", "faer?/rayon"]
+nalgebra = ["nalgebra_v0_35"]
+nalgebra_v0_32 = ["nalgebra_all", "dep:nalgebra_0_32", "dep:nalgebra_sparse_0_9"]
+nalgebra_v0_33 = ["nalgebra_all", "dep:nalgebra_0_33", "dep:nalgebra_sparse_0_10"]
+nalgebra_v0_34 = ["nalgebra_all", "dep:nalgebra_0_34", "dep:nalgebra_sparse_0_11"]
+nalgebra_v0_35 = ["nalgebra_all", "dep:nalgebra", "dep:nalgebra-sparse"]
+ndarray = ["ndarray_v0_17"]
+ndarray_v0_15 = ["ndarray_all", "dep:ndarray_0_15"]
+ndarray_v0_16 = ["ndarray_all", "dep:ndarray_0_16"]
+ndarray_v0_17 = ["ndarray_all", "dep:ndarray"]
+faer = ["faer_v0_24"]
+faer_v0_22 = ["faer_all", "dep:faer_0_22", "dep:faer_traits_0_22"]
+faer_v0_23 = ["faer_all", "dep:faer_0_23", "dep:faer_traits_0_23"]
+faer_v0_24 = ["faer_all", "dep:faer", "dep:faer-traits"]
+parallel = ["dep:rayon", "faer?/rayon", "faer_0_22?/rayon", "faer_0_23?/rayon"]
+
+# Internal markers let shared code and examples accept any supported release.
+nalgebra_all = []
+ndarray_all = []
+faer_all = []
 
 [dev-dependencies]
 approx = "0.5"
@@ -44,15 +81,15 @@ rand_chacha = "0.10"
 
 [[example]]
 name = "least_squares_gd"
-required-features = ["faer"]
+required-features = ["faer_all"]
 
 [[example]]
 name = "coordinate_descent"
-required-features = ["faer"]
+required-features = ["faer_all"]
 
 [[example]]
 name = "slope_primitives"
-required-features = ["faer"]
+required-features = ["faer_all"]
 
 [[bench]]
 name = "column_sds"

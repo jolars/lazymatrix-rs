@@ -1,5 +1,9 @@
-#![cfg(feature = "nalgebra")]
+#![cfg(feature = "nalgebra_all")]
 //! Verification of the nalgebra sparse backend against the dense oracle.
+
+#[path = "common/backend_aliases.rs"]
+mod backend_aliases;
+use backend_aliases::*;
 
 #[path = "common/runner.rs"]
 mod common;

@@ -43,35 +43,59 @@ jobs:
       - run: cargo doc --no-deps --all-features --locked
 
   test:
-    name: test (${{ matrix.features }})
+    name: test (${{ matrix.group }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - features: default
-            flags: ""
-          - features: nalgebra
-            flags: "--features nalgebra"
-          - features: faer
-            flags: "--features faer"
-          - features: ndarray
-            flags: "--features ndarray"
-          - features: ndarray-parallel
-            flags: "--features ndarray,parallel"
-          - features: all
-            flags: "--all-features"
+          - group: core
+            args: core
+          - group: version-selection
+            args: selection
+          - group: faer-0.22
+            args: version faer_v0_22
+          - group: faer-0.23
+            args: version faer_v0_23
+          - group: faer-0.24
+            args: version faer_v0_24
+          - group: nalgebra-0.32
+            args: version nalgebra_v0_32
+          - group: nalgebra-0.33
+            args: version nalgebra_v0_33
+          - group: nalgebra-0.34
+            args: version nalgebra_v0_34
+          - group: nalgebra-0.35
+            args: version nalgebra_v0_35
+          - group: ndarray-0.15
+            args: version ndarray_v0_15
+          - group: ndarray-0.16
+            args: version ndarray_v0_16
+          - group: ndarray-0.17
+            args: version ndarray_v0_17
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.features }}
-      - run: cargo build --locked ${{ matrix.flags }}
-      - run: cargo test --locked ${{ matrix.flags }}
+          key: ${{ matrix.group }}
+      - run: bash scripts/test-backends.sh ${{ matrix.args }}
+
+  msrv:
+    name: MSRV (Rust 1.87)
+    runs-on: ubuntu-latest
+    env:
+      RUSTUP_TOOLCHAIN: 1.87.0
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install 1.87.0 --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      - run: bash scripts/test-backends.sh msrv
 
   versionary:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: test
+    needs: [test, msrv]
     runs-on: ubuntu-latest
     permissions:
       contents: write

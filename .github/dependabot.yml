@@ -14,8 +14,9 @@ updates:
     schedule:
       interval: "weekly"
     ignore:
-      # Backend versions track Basin's compatibility surface.
+      # New backend release lines require explicit features and compatibility tests.
       - dependency-name: "faer"
       - dependency-name: "faer-traits"
       - dependency-name: "nalgebra"
       - dependency-name: "nalgebra-sparse"
+      - dependency-name: "ndarray"

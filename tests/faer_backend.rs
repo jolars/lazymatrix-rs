@@ -1,5 +1,9 @@
-#![cfg(feature = "faer")]
+#![cfg(feature = "faer_all")]
 //! Verification of the faer sparse backend against the dense oracle.
+
+#[path = "common/backend_aliases.rs"]
+mod backend_aliases;
+use backend_aliases::*;
 
 #[path = "common/runner.rs"]
 mod common;

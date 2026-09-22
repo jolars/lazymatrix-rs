@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+faer_versions=(faer_v0_22 faer_v0_23 faer_v0_24)
+nalgebra_versions=(nalgebra_v0_32 nalgebra_v0_33 nalgebra_v0_34 nalgebra_v0_35)
+ndarray_versions=(ndarray_v0_15 ndarray_v0_16 ndarray_v0_17)
+versions=("${faer_versions[@]}" "${nalgebra_versions[@]}" "${ndarray_versions[@]}")
+
+test_features() {
+    cargo test --locked --no-default-features "$@"
+}
+
+test_version() {
+    test_features --features "$1"
+    test_features --features "$1,parallel"
+}
+
+test_core() {
+    test_features
+    for features in parallel faer nalgebra ndarray \
+        faer,nalgebra,ndarray faer,nalgebra,ndarray,parallel \
+        faer_v0_22,nalgebra_v0_32,ndarray_v0_15 \
+        faer_v0_22,nalgebra_v0_32,ndarray_v0_15,parallel; do
+        test_features --features "$features"
+    done
+    test_features --all-features
+}
+
+test_pairs() {
+    local versions=("$@")
+    local i j
+    for ((i = 0; i < ${#versions[@]}; i++)); do
+        for ((j = i + 1; j < ${#versions[@]}; j++)); do
+            test_features --features "${versions[i]},${versions[j]}"
+        done
+    done
+}
+
+test_selection() {
+    test_pairs "${faer_versions[@]}"
+    test_pairs "${nalgebra_versions[@]}"
+    test_pairs "${ndarray_versions[@]}"
+}
+
+check_msrv() {
+    if [[ $(rustc --version) != "rustc 1.87.0 "* ]]; then
+        echo "Run the MSRV checks with the Rust 1.87.0 toolchain." >&2
+        exit 1
+    fi
+    cargo check --all-targets --locked --no-default-features
+    cargo check --all-targets --locked --no-default-features --features parallel
+    for feature in "${versions[@]}"; do
+        if [[ $feature != nalgebra_v0_35 ]]; then
+            cargo check --all-targets --locked --no-default-features --features "$feature"
+            cargo check --all-targets --locked --no-default-features --features "$feature,parallel"
+        fi
+    done
+}
+
+case "${1:-all}" in
+all)
+    test_core
+    for feature in "${versions[@]}"; do
+        test_version "$feature"
+    done
+    test_selection
+    ;;
+core) test_core ;;
+version) test_version "${2:?Specify a version feature.}" ;;
+selection) test_selection ;;
+msrv) check_msrv ;;
+*)
+    echo "Usage: $0 [all|core|version FEATURE|selection|msrv]" >&2
+    exit 1
+    ;;
+esac

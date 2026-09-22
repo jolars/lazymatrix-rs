@@ -13,6 +13,10 @@
 //!
 //! Run with: `cargo run --example least_squares_gd --features faer`
 
+#[path = "../tests/common/backend_aliases.rs"]
+mod backend_aliases;
+use backend_aliases::*;
+
 use faer::Col;
 use faer::sparse::{SparseColMat, Triplet};
 use lazymatrix::{

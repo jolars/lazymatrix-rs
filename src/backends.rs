@@ -1,10 +1,10 @@
 mod support;
 
-#[cfg(feature = "faer")]
+#[cfg(feature = "faer_all")]
 mod faer;
 
-#[cfg(feature = "nalgebra")]
+#[cfg(feature = "nalgebra_all")]
 mod nalgebra;
 
-#[cfg(feature = "ndarray")]
+#[cfg(feature = "ndarray_all")]
 mod ndarray;

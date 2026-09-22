@@ -36,6 +36,25 @@ cargo add lazymatrix --features nalgebra
 cargo add lazymatrix --features ndarray
 ```
 
+Unversioned features select the newest supported release. Use a versioned
+feature to stay on a particular release line:
+
+| Backend | Versioned features | Unversioned feature selects |
+| --- | --- | --- |
+| faer | `faer_v0_22`, `faer_v0_23`, `faer_v0_24` | 0.24 |
+| nalgebra | `nalgebra_v0_32`, `nalgebra_v0_33`, `nalgebra_v0_34`, `nalgebra_v0_35` | 0.35 |
+| ndarray | `ndarray_v0_15`, `ndarray_v0_16`, `ndarray_v0_17` | 0.17 |
+
+For example, `cargo add lazymatrix --features nalgebra_v0_34` enables nalgebra
+0.34 and nalgebra-sparse 0.11. Set your direct backend dependency to the same
+release line. If Cargo enables multiple releases of one backend, lazymatrix
+implements traits only for the newest enabled release. The `*_all` features
+are internal markers, not entry points for selecting a backend.
+
+The core and older backends support Rust 1.87. The `nalgebra` feature now selects
+nalgebra 0.35, which requires Rust 1.89. To retain the previous release and Rust
+1.87 support, replace `nalgebra` with `nalgebra_v0_34` in your feature list.
+
 ## Example
 
 ```rust
@@ -58,8 +77,8 @@ let y = x.matvec(&DVector::from_vec(vec![1.0, -1.0]));
 ```
 
 The same interface works with faer and nalgebra dense matrices, their borrowed
-views, and CSC sparse matrices. The `ndarray` feature supports ndarray 0.17 dense
-arrays, including borrowed, transposed, and strided views:
+views, and CSC sparse matrices. The ndarray backends support dense arrays,
+including borrowed, transposed, and strided views:
 
 ```rust
 use lazymatrix::{Centering, LazyMatrix, MatVec, Normalization, Scaling};
