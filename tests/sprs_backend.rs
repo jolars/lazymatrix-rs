@@ -1,0 +1,272 @@
+#![cfg(feature = "sprs_all")]
+//! Verification of sprs storage and borrowed views against the dense oracle.
+
+#[path = "common/backend_aliases.rs"]
+mod backend_aliases;
+use backend_aliases::*;
+
+#[path = "common/runner.rs"]
+mod common;
+
+use common::{TestMatrix, assert_close};
+use lazymatrix::{
+    Centering, ColumnStats, LazyMatrix, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto,
+    Normalization, Scaling, SparseColumns, SprsCsc,
+};
+use sprs::{CsMat, CsMatI, TriMat};
+
+fn build(tm: &TestMatrix) -> CsMat<f64> {
+    let mut triplets = TriMat::new((tm.nrows, tm.ncols));
+    for &(row, col, value) in &tm.triplets {
+        triplets.add_triplet(row, col, value);
+    }
+    triplets.to_csc()
+}
+
+#[test]
+fn sprs_backend_suite() {
+    common::run_backend_suite(build, |v| v.to_vec(), Clone::clone);
+    common::run_backend_suite(|tm| build(tm).to_csr(), |v| v.to_vec(), Clone::clone);
+    common::run_backend_suite(
+        |tm| SprsCsc::try_new(build(tm)).unwrap(),
+        |v| v.to_vec(),
+        Clone::clone,
+    );
+    common::run_sparse_columns_suite(|tm| SprsCsc::try_new(build(tm)).unwrap());
+    common::run_logical_columns_suite(|tm| SprsCsc::try_new(build(tm)).unwrap());
+    common::run_logical_columns_suite(|tm| {
+        let mut triplets = sprs::TriMatI::<_, u32>::new((tm.nrows, tm.ncols));
+        for &(row, col, value) in &tm.triplets {
+            triplets.add_triplet(row, col, value);
+        }
+        SprsCsc::try_new(triplets.to_csc::<u64>()).unwrap()
+    });
+}
+
+#[test]
+fn sprs_csc_wrapper_checks_orientation_without_copying() {
+    let matrix = CsMat::new_csc(
+        (4, 3),
+        vec![0, 1, 3, 4],
+        vec![0, 1, 3, 2],
+        vec![5.0, 0.0, 2.0, -1.0],
+    );
+    let data_ptr = matrix.data().as_ptr();
+    let wrapped = SprsCsc::try_new(matrix).unwrap();
+    assert_eq!(wrapped.as_inner().data().as_ptr(), data_ptr);
+    let matrix = wrapped.into_inner();
+    let view = matrix.slice_outer(1..3);
+    let wrapped = SprsCsc::try_new(view).unwrap();
+    let (rows, values) = wrapped.sparse_column(0);
+    assert_eq!(rows, &[1, 3]);
+    assert_eq!(values, &[0.0, 2.0]);
+    assert_eq!(rows.as_ptr(), matrix.indices()[1..].as_ptr());
+    assert_eq!(values.as_ptr(), matrix.data()[1..].as_ptr());
+    let lazy = LazyMatrix::new(wrapped, Normalization::new(Centering::Mean, Scaling::L2));
+    assert_eq!(lazy.sparse_column(0).values().len(), 2);
+    assert_close(
+        &lazy.matvec(&vec![1.0, 0.0]),
+        &[
+            -0.5 / 3.0_f64.sqrt(),
+            -0.5 / 3.0_f64.sqrt(),
+            -0.5 / 3.0_f64.sqrt(),
+            1.5 / 3.0_f64.sqrt(),
+        ],
+        1e-12,
+    );
+    let csr = matrix.to_csr();
+    let data_ptr = csr.data().as_ptr();
+    let rejected = SprsCsc::try_new(csr).unwrap_err();
+    assert!(rejected.is_csr());
+    assert_eq!(rejected.data().as_ptr(), data_ptr);
+}
+
+#[test]
+fn sprs_views_and_alternate_indices_support_products_and_statistics() {
+    let mut csc =
+        CsMatI::<f32, u32, u64>::new_csc((3, 2), vec![0, 2, 3], vec![0, 2, 1], vec![1.0, 3.0, 2.0]);
+    let csr = csc.to_csr();
+    for matrix in [csc.view(), csr.view()] {
+        assert_eq!(matrix.matvec(&vec![2.0, -1.0]), vec![2.0, -2.0, 6.0]);
+        assert_eq!(matrix.col_means(), vec![4.0 / 3.0, 2.0 / 3.0]);
+        assert_eq!(
+            matrix.mat_transpose_vec(&vec![1.0, 2.0, 3.0]),
+            vec![10.0, 4.0]
+        );
+    }
+    let lazy = LazyMatrix::new(
+        csc.view_mut(),
+        Normalization::new(Centering::Mean, Scaling::Sd),
+    );
+    assert!(lazy.matvec(&vec![1.0, 2.0]).iter().all(|v| v.is_finite()));
+}
+
+#[test]
+fn sprs_sliced_and_transposed_views_use_local_dimensions() {
+    let csc = build(&common::random_matrix(57, 8, 6, 0.5));
+    let csr = csc.to_csr();
+    for matrix in [
+        csc.slice_outer(1..5),
+        csr.slice_outer(2..7),
+        csc.transpose_view(),
+        csr.transpose_view(),
+    ] {
+        let dense: Vec<Vec<_>> = (0..matrix.rows())
+            .map(|i| {
+                (0..matrix.cols())
+                    .map(|j| matrix.get(i, j).copied().unwrap_or(0.0))
+                    .collect()
+            })
+            .collect();
+        let v = common::random_vec(58, matrix.cols());
+        let u = common::random_vec(59, matrix.rows());
+        for center in [Centering::None, Centering::Mean, Centering::Min] {
+            for scale in [
+                Scaling::None,
+                Scaling::Sd,
+                Scaling::L1,
+                Scaling::L2,
+                Scaling::MaxAbs,
+                Scaling::Range,
+            ] {
+                let spec = Normalization::new(center, scale);
+                let lazy = LazyMatrix::new(matrix, spec);
+                let owned = LazyMatrix::new(matrix.to_owned(), spec);
+                assert_eq!(lazy.centers(), owned.centers());
+                assert_eq!(lazy.scales(), owned.scales());
+                let normalized = common::materialize(&dense, lazy.centers(), lazy.scales());
+                assert_close(
+                    &lazy.matvec(&v),
+                    &common::dense_matvec(&normalized, &v),
+                    1e-10,
+                );
+                assert_close(
+                    &lazy.mat_transpose_vec(&u),
+                    &common::dense_tmatvec(&normalized, &u),
+                    1e-10,
+                );
+                if matrix.is_csc() {
+                    let columns = LazyMatrix::new(SprsCsc::try_new(matrix).unwrap(), spec);
+                    for j in 0..matrix.cols() {
+                        let column = columns.column(j);
+                        let range = matrix.indptr().outer_inds_sz(j);
+                        assert_eq!(column.raw().data().as_ptr(), matrix.data()[range].as_ptr());
+                        approx::assert_abs_diff_eq!(
+                            column.dot(&u),
+                            common::dense_tmatvec(&normalized, &u)[j],
+                            epsilon = 1e-10
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn sprs_f32_normalization_and_mutable_csc_view() {
+    let mut csc = CsMat::new_csc(
+        (2, 2),
+        vec![0, 2, 4],
+        vec![0, 1, 0, 1],
+        vec![1.0_f32, 3.0, 3.0, 3.0],
+    );
+    let csr = csc.to_csr();
+    for matrix in [csc.view(), csr.view()] {
+        let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd));
+        assert_eq!(lazy.centers(), Some([2.0, 3.0].as_slice()));
+        assert_eq!(lazy.scales(), Some([1.0, 1.0].as_slice()));
+        assert_eq!(lazy.matvec(&vec![2.0, 1.0]), vec![-2.0, 2.0]);
+        assert_eq!(lazy.mat_transpose_vec(&vec![1.0, 2.0]), vec![1.0, 0.0]);
+    }
+    let wrapped = SprsCsc::try_new(csc.view_mut()).unwrap();
+    let lazy = LazyMatrix::new(wrapped, Normalization::new(Centering::Mean, Scaling::Sd));
+    assert_eq!(lazy.column(0).dot(&[1.0, 2.0]), 1.0);
+}
+
+#[test]
+fn sprs_infinite_statistics_preserve_ieee_values() {
+    let csc = CsMat::new_csc(
+        (2, 2),
+        vec![0, 1, 2],
+        vec![0, 1],
+        vec![f64::INFINITY, f64::NEG_INFINITY],
+    );
+    let csr = csc.to_csr();
+    for matrix in [csc.view(), csr.view()] {
+        assert_eq!(matrix.col_means(), vec![f64::INFINITY, f64::NEG_INFINITY]);
+        assert!(matrix.col_sds().iter().all(|v| v.is_nan()));
+        assert_eq!(matrix.col_mins(), vec![0.0, f64::NEG_INFINITY]);
+        assert_eq!(matrix.col_ranges(), vec![f64::INFINITY; 2]);
+        assert_eq!(matrix.col_maxabs(), vec![f64::INFINITY; 2]);
+        assert_eq!(matrix.col_l1_centered(&[1.0, -1.0]), vec![f64::INFINITY; 2]);
+        assert_eq!(matrix.col_l2_centered(&[1.0, -1.0]), vec![f64::INFINITY; 2]);
+        assert_eq!(
+            matrix.col_maxabs_centered(&[1.0, -1.0]),
+            vec![f64::INFINITY; 2]
+        );
+    }
+}
+
+#[test]
+fn sprs_reusable_products_validate_dimensions_and_overwrite_nan() {
+    let csc = CsMat::new_csc((3, 2), vec![0, 1, 2], vec![0, 2], vec![2.0, -1.0]);
+    for matrix in [csc.view(), csc.transpose_view()] {
+        let mut out = vec![f64::NAN; matrix.rows()];
+        matrix.matvec_into(&vec![1.0; matrix.cols()], &mut out);
+        assert!(out.iter().all(|v| v.is_finite()));
+        assert!(std::panic::catch_unwind(|| matrix.matvec(&vec![1.0; matrix.cols() + 1])).is_err());
+        assert!(
+            std::panic::catch_unwind(|| matrix.mat_transpose_vec(&vec![1.0; matrix.rows() + 1]))
+                .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(
+                || matrix.matvec_into(&vec![1.0; matrix.cols()], &mut vec![0.0; matrix.rows() + 1])
+            )
+            .is_err()
+        );
+        assert!(
+            std::panic::catch_unwind(|| matrix.mat_transpose_vec_into(
+                &vec![1.0; matrix.rows()],
+                &mut vec![0.0; matrix.cols() + 1]
+            ))
+            .is_err()
+        );
+    }
+}
+
+#[cfg(feature = "ndarray_all")]
+#[test]
+fn sprs_ndarray_vectors_and_strided_destinations() {
+    use ndarray::{Array1, array, s};
+    common::run_backend_suite(build, |v| Array1::from_vec(v.to_vec()), |v| v.to_vec());
+    common::run_backend_suite(
+        |tm| build(tm).to_csr(),
+        |v| Array1::from_vec(v.to_vec()),
+        |v| v.to_vec(),
+    );
+    let matrix = CsMat::new_csc((3, 2), vec![0, 1, 2], vec![0, 2], vec![2.0, -1.0]);
+    let storage = array![1.0, -99.0, 2.0];
+    let mut out = Array1::from_elem(6, f64::NAN);
+    matrix.matvec_into(&storage.slice(s![..;-2]), &mut out.slice_mut(s![..;-2]));
+    assert_eq!(out.slice(s![..;-2]).to_vec(), vec![4.0, 0.0, -1.0]);
+    assert!(out.slice(s![..;2]).iter().all(|v| v.is_nan()));
+
+    let lazy = LazyMatrix::new(
+        SprsCsc::try_new(matrix.view()).unwrap(),
+        Normalization::new(Centering::Mean, Scaling::Sd),
+    );
+    let input = array![1.0, 3.0, 2.0];
+    let mut transpose_out = array![f64::NAN, -99.0, f64::NAN, -99.0];
+    lazy.mat_transpose_vec_into(
+        &input.slice(s![..;-1]),
+        &mut transpose_out.slice_mut(s![..;2]),
+    );
+    assert_close(
+        &transpose_out.slice(s![..;2]).to_vec(),
+        &lazy.mat_transpose_vec(&vec![2.0, 3.0, 1.0]),
+        1e-12,
+    );
+    assert_eq!(transpose_out.slice(s![1..;2]).to_vec(), vec![-99.0; 2]);
+}

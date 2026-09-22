@@ -8,3 +8,6 @@ mod nalgebra;
 
 #[cfg(feature = "ndarray_all")]
 mod ndarray;
+
+#[cfg(feature = "sprs_all")]
+pub(crate) mod sprs;

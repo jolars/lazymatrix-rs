@@ -244,7 +244,7 @@ fn reusable_output_parity<M, V>(
     assert!(from_v(&empty).is_empty());
 }
 
-fn vector_algebra<V>(to_v: &impl Fn(&[f64]) -> V, from_v: &impl Fn(&V) -> Vec<f64>)
+pub fn vector_algebra<V>(to_v: &impl Fn(&[f64]) -> V, from_v: &impl Fn(&V) -> Vec<f64>)
 where
     V: DotProduct<f64> + L2Norm<f64> + ScaledAddAssign<f64> + ScaleAssign<f64>,
 {

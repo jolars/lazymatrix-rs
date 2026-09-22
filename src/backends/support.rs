@@ -6,7 +6,8 @@ use crate::traits::Scalar;
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 pub(crate) trait MaybeSend: Send {}
@@ -16,7 +17,8 @@ pub(crate) trait MaybeSend: Send {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 impl<T: Send + ?Sized> MaybeSend for T {}
@@ -26,7 +28,8 @@ impl<T: Send + ?Sized> MaybeSend for T {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 pub(crate) trait MaybeSend {}
@@ -36,7 +39,8 @@ pub(crate) trait MaybeSend {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 impl<T: ?Sized> MaybeSend for T {}
@@ -47,7 +51,8 @@ impl<T: ?Sized> MaybeSend for T {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 pub(crate) trait MaybeSync: Sync {}
@@ -57,7 +62,8 @@ pub(crate) trait MaybeSync: Sync {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 impl<T: Sync + ?Sized> MaybeSync for T {}
@@ -67,7 +73,8 @@ impl<T: Sync + ?Sized> MaybeSync for T {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 pub(crate) trait MaybeSync {}
@@ -77,7 +84,8 @@ pub(crate) trait MaybeSync {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 impl<T: ?Sized> MaybeSync for T {}
@@ -87,7 +95,8 @@ impl<T: ?Sized> MaybeSync for T {}
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 pub(crate) fn collect_columns<T, Map>(ncols: usize, map: Map) -> Vec<T>
@@ -104,7 +113,8 @@ where
     any(
         feature = "faer_all",
         feature = "nalgebra_all",
-        feature = "ndarray_all"
+        feature = "ndarray_all",
+        feature = "sprs_all"
     )
 ))]
 pub(crate) fn collect_columns<T, Map>(ncols: usize, map: Map) -> Vec<T>
@@ -146,7 +156,8 @@ pub(crate) fn sparse_column_sd<F: Scalar>(values: &[F], nrows: usize) -> F {
 #[cfg(any(
     feature = "faer_all",
     feature = "nalgebra_all",
-    feature = "ndarray_all"
+    feature = "ndarray_all",
+    feature = "sprs_all"
 ))]
 pub(crate) fn max_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
     values.fold(F::zero(), |maximum, value| {
@@ -165,7 +176,8 @@ pub(crate) fn max_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
 #[cfg(any(
     feature = "faer_all",
     feature = "nalgebra_all",
-    feature = "ndarray_all"
+    feature = "ndarray_all",
+    feature = "sprs_all"
 ))]
 pub(crate) fn min_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
     values
@@ -184,7 +196,8 @@ pub(crate) fn min_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
 #[cfg(any(
     feature = "faer_all",
     feature = "nalgebra_all",
-    feature = "ndarray_all"
+    feature = "ndarray_all",
+    feature = "sprs_all"
 ))]
 pub(crate) fn range_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
     values

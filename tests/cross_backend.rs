@@ -2,6 +2,14 @@
     all(feature = "faer_all", feature = "nalgebra_all"),
     all(feature = "faer_all", feature = "ndarray_all"),
     all(feature = "nalgebra_all", feature = "ndarray_all"),
+    all(
+        feature = "sprs_all",
+        any(
+            feature = "faer_all",
+            feature = "nalgebra_all",
+            feature = "ndarray_all"
+        )
+    ),
 ))]
 //! Cross-backend agreement: the same logical matrix, normalized the same way,
 //! produces matching operator outputs under each pair of enabled backends.
@@ -17,6 +25,19 @@ use common::{TestMatrix, assert_close, random_matrix, random_vec};
 use lazymatrix::{Centering, LazyMatrix, MatTransposeVec, MatVec, Normalization, Scaling};
 
 type Products = (Vec<f64>, Vec<f64>);
+
+#[cfg(feature = "sprs_all")]
+fn sprs_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
+    let mut triplets = sprs::TriMat::new((tm.nrows, tm.ncols));
+    for &(row, col, value) in &tm.triplets {
+        triplets.add_triplet(row, col, value);
+    }
+    let lazy = LazyMatrix::new(triplets.to_csc::<usize>(), spec);
+    (
+        lazy.matvec(&v.to_vec()),
+        lazy.mat_transpose_vec(&u.to_vec()),
+    )
+}
 
 #[cfg(feature = "faer_all")]
 fn faer_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
@@ -114,4 +135,22 @@ fn faer_and_ndarray_agree() {
 #[test]
 fn nalgebra_and_ndarray_agree() {
     check_agreement(nalgebra_products, ndarray_products);
+}
+
+#[cfg(all(feature = "sprs_all", feature = "faer_all"))]
+#[test]
+fn sprs_and_faer_agree() {
+    check_agreement(sprs_products, faer_products);
+}
+
+#[cfg(all(feature = "sprs_all", feature = "nalgebra_all"))]
+#[test]
+fn sprs_and_nalgebra_agree() {
+    check_agreement(sprs_products, nalgebra_products);
+}
+
+#[cfg(all(feature = "sprs_all", feature = "ndarray_all"))]
+#[test]
+fn sprs_and_ndarray_agree() {
+    check_agreement(sprs_products, ndarray_products);
 }

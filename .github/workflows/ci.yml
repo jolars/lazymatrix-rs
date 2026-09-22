@@ -73,6 +73,8 @@ jobs:
             args: version ndarray_v0_16
           - group: ndarray-0.17
             args: version ndarray_v0_17
+          - group: sprs-0.11
+            args: version sprs_v0_11
     steps:
       - uses: actions/checkout@v7
       - uses: Swatinem/rust-cache@v2

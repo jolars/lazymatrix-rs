@@ -34,6 +34,8 @@ cargo add lazymatrix --features faer
 cargo add lazymatrix --features nalgebra
 # or, for dense arrays
 cargo add lazymatrix --features ndarray
+# or, for sprs sparse matrices
+cargo add lazymatrix --features sprs
 ```
 
 Unversioned features select the newest supported release. Use a versioned
@@ -44,6 +46,7 @@ feature to stay on a particular release line:
 | faer | `faer_v0_22`, `faer_v0_23`, `faer_v0_24` | 0.24 |
 | nalgebra | `nalgebra_v0_32`, `nalgebra_v0_33`, `nalgebra_v0_34`, `nalgebra_v0_35` | 0.35 |
 | ndarray | `ndarray_v0_15`, `ndarray_v0_16`, `ndarray_v0_17` | 0.17 |
+| sprs | `sprs_v0_11` | 0.11 |
 
 For example, `cargo add lazymatrix --features nalgebra_v0_34` enables nalgebra
 0.34 and nalgebra-sparse 0.11. Set your direct backend dependency to the same
@@ -54,6 +57,8 @@ are internal markers, not entry points for selecting a backend.
 The core and older backends support Rust 1.87. The `nalgebra` feature now selects
 nalgebra 0.35, which requires Rust 1.89. To retain the previous release and Rust
 1.87 support, replace `nalgebra` with `nalgebra_v0_34` in your feature list.
+The sprs backend supports Rust 1.87 with sprs 0.11.4 (used in the lockfile);
+sprs 0.11.5 requires Rust 1.88.
 
 ## Example
 
@@ -100,7 +105,46 @@ products accept immutable vector views directly. Borrowed column access preserve
 the original strides and takes O(1) time; dense logical-column operations take
 O(nrows) time.
 
+The sprs backend supports owned CSC and CSR matrices and borrowed views. Use
+`Vec` for allocating products, or enable an ndarray feature to use that
+release's `Array1`. Reusable-output products accept any supported dense vector
+view, including strided ndarray inputs and destinations. The `sprs` feature
+does not select an ndarray backend version.
+
+Wrap CSC storage in `SprsCsc` to borrow logical or sparse columns:
+
+```rust
+use lazymatrix::{Centering, LazyMatrix, MatVec, Normalization, Scaling, SprsCsc};
+use sprs::CsMat;
+
+let x = CsMat::new_csc(
+    (3, 2),
+    vec![0, 2, 3],
+    vec![0, 2, 1],
+    vec![1.0, 3.0, 2.0],
+);
+let csc = SprsCsc::try_new(x.view()).unwrap();
+let lazy = LazyMatrix::new(csc, Normalization::new(Centering::Mean, Scaling::Sd));
+let y = lazy.matvec(&vec![1.0, -1.0]);
+let column = lazy.sparse_column(0);
+assert_eq!(column.row_indices(), &[0, 2]);
+```
+
+`SprsCsc::try_new` checks orientation in O(1) time and returns a CSR input
+unchanged as `Err`. Convert CSR explicitly with `to_csc()` or `into_csc()` when
+column access is needed. Products and statistics also work directly on
+`CsMat` or `CsMatView` in either orientation. They visit stored entries without
+materializing the normalized matrix. CSC statistics take O(ncols + nnz) time;
+CSR statistics take O(nrows + ncols + nnz) time and O(ncols) workspace.
+
+Logical columns borrow sprs vector views for any supported index type.
+`SparseColumns` requires `usize` row indices so it can return slices without
+copying. A centered column dot takes O(nrows + nnz_column); `dot_with_sum`
+uses a caller-supplied vector sum to take O(nnz_column).
+
 Enable `parallel` alongside a backend to compute column statistics with Rayon.
+For sprs, CSC columns run independently in parallel; CSR statistics scan rows
+serially to accumulate columns without converting storage.
 See [`examples/`](examples/) for complete solver examples that consume the
 operator.
 

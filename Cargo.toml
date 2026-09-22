@@ -15,7 +15,7 @@ keywords = ["matrix", "sparse", "linear-algebra", "centering", "scaling"]
 categories = ["mathematics", "science", "algorithms"]
 
 [package.metadata.docs.rs]
-features = ["faer", "nalgebra", "ndarray", "parallel"]
+features = ["faer", "nalgebra", "ndarray", "sprs", "parallel"]
 
 [dependencies]
 num-traits = { version = "0.2", default-features = false, features = ["std"] }
@@ -47,9 +47,12 @@ faer_traits_0_22 = { package = "faer-traits", version = "0.22", optional = true,
 faer_traits_0_23 = { package = "faer-traits", version = "0.23", optional = true, default-features = false }
 faer-traits = { version = "0.24", optional = true, default-features = false }
 rayon = { version = "1", optional = true }
+sprs = { version = "0.11.4", optional = true, default-features = false }
 
 [features]
 default = []
+sprs = ["sprs_v0_11"]
+sprs_v0_11 = ["sprs_all", "dep:sprs"]
 nalgebra = ["nalgebra_v0_35"]
 nalgebra_v0_32 = ["nalgebra_all", "dep:nalgebra_0_32", "dep:nalgebra_sparse_0_9"]
 nalgebra_v0_33 = ["nalgebra_all", "dep:nalgebra_0_33", "dep:nalgebra_sparse_0_10"]
@@ -69,6 +72,7 @@ parallel = ["dep:rayon", "faer?/rayon", "faer_0_22?/rayon", "faer_0_23?/rayon"]
 nalgebra_all = []
 ndarray_all = []
 faer_all = []
+sprs_all = []
 
 [dev-dependencies]
 approx = "0.5"
@@ -94,3 +98,8 @@ required-features = ["faer_all"]
 [[bench]]
 name = "column_sds"
 harness = false
+
+[[bench]]
+name = "sprs_backend"
+harness = false
+required-features = ["sprs_all"]

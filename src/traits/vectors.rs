@@ -134,3 +134,79 @@ pub trait SumEntries<F: Scalar> {
 pub trait ScaledSubSlice<F: Scalar> {
     fn scaled_sub_slice(&mut self, k: F, coeffs: &[F]);
 }
+
+impl<F: Scalar> DotProduct<F> for Vec<F> {
+    fn dot(&self, other: &Self) -> F {
+        self.dot_slice(other)
+    }
+}
+
+impl<F: Scalar> L2Norm<F> for Vec<F> {
+    fn norm_l2(&self) -> F {
+        self.iter().map(|&value| value * value).sum::<F>().sqrt()
+    }
+}
+
+impl<F: Scalar> ScaledAddAssign<F> for Vec<F> {
+    fn scaled_add_assign(&mut self, alpha: F, other: &Self) {
+        assert_eq!(
+            self.len(),
+            other.len(),
+            "scaled_add_assign: length mismatch"
+        );
+        for (value, &other) in self.iter_mut().zip(other) {
+            *value = *value + alpha * other;
+        }
+    }
+}
+
+impl<F: Scalar> ScaleAssign<F> for Vec<F> {
+    fn scale_assign(&mut self, alpha: F) {
+        for value in self.iter_mut() {
+            *value = *value * alpha;
+        }
+    }
+}
+
+impl<F: Scalar> ElemDivAssign<F> for Vec<F> {
+    fn elem_div_assign(&mut self, coeffs: &[F]) {
+        assert_eq!(self.len(), coeffs.len(), "elem_div_assign: length mismatch");
+        for (value, &coefficient) in self.iter_mut().zip(coeffs) {
+            *value = *value / coefficient;
+        }
+    }
+}
+
+impl<F: Scalar> DotSlice<F> for Vec<F> {
+    fn dot_slice(&self, coeffs: &[F]) -> F {
+        assert_eq!(self.len(), coeffs.len(), "dot_slice: length mismatch");
+        self.iter().zip(coeffs).map(|(&a, &b)| a * b).sum()
+    }
+}
+
+impl<F: Scalar> SubScalarAssign<F> for Vec<F> {
+    fn sub_scalar_assign(&mut self, k: F) {
+        for value in self.iter_mut() {
+            *value = *value - k;
+        }
+    }
+}
+
+impl<F: Scalar> SumEntries<F> for Vec<F> {
+    fn sum_entries(&self) -> F {
+        self.iter().copied().sum()
+    }
+}
+
+impl<F: Scalar> ScaledSubSlice<F> for Vec<F> {
+    fn scaled_sub_slice(&mut self, k: F, coeffs: &[F]) {
+        assert_eq!(
+            self.len(),
+            coeffs.len(),
+            "scaled_sub_slice: length mismatch"
+        );
+        for (value, &coefficient) in self.iter_mut().zip(coeffs) {
+            *value = *value - k * coefficient;
+        }
+    }
+}

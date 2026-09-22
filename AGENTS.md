@@ -15,7 +15,9 @@ re-exports. The main implementation is divided as follows:
   sparse-aware statistics, and column capabilities.
 - `src/backends/faer/` and `src/backends/nalgebra/` contain feature-gated dense,
   sparse, and vector implementations. `src/backends/ndarray/` contains dense
-  matrix and vector implementations. Shared helpers live in `src/backends/support.rs`.
+  matrix and vector implementations. `src/backends/sprs/` contains sparse
+  statistics and the checked `SprsCsc` column wrapper; `src/backends/sprs.rs`
+  implements CSC and CSR products. Shared helpers live in `src/backends/support.rs`.
 
 Keep backend-independent logic out of backend implementation directories. With
 no features enabled, the crate provides its traits and `LazyMatrix` with only
@@ -23,7 +25,7 @@ no features enabled, the crate provides its traits and `LazyMatrix` with only
 a matrix/vector pair. This crate contains no FFI.
 
 Each supported backend release has a version feature, such as `faer_v0_22`.
-The unversioned `faer`, `nalgebra`, and `ndarray` features select the newest
+The unversioned `faer`, `nalgebra`, `ndarray`, and `sprs` features select the newest
 supported release. If feature unification enables multiple releases, implement
 only the newest enabled release. Keep crate aliases in `src/lib.rs` and
 `tests/common/backend_aliases.rs` synchronized; examples also use the latter.
@@ -79,8 +81,11 @@ sparse-plus-offset representation. Put logical column operations—dots, weighte
 products, scaled additions, and norms—on the view so callers do not rederive
 normalization formulas. Keep raw slices available for specialized algorithms,
 and document complexity: a centered dot requiring a dense vector sum is O(n +
-nnz), while a cached-sum path is O(nnz). Row views, `SparseRows`, and CSR
-backends are prospective work described in `TODO.md`, not current API.
+nnz), while a cached-sum path is O(nnz). sprs supports CSC and CSR operators
+directly because orientation is a runtime flag. Only the checked `SprsCsc`
+wrapper implements column borrowing; `SparseColumns` additionally requires
+`usize` row indices. Row views, `SparseRows`, and faer and nalgebra CSR
+backends remain prospective work described in `TODO.md`.
 
 ## Example-Driven Design
 
@@ -106,7 +111,8 @@ sums, update rules, or an entire solver to the crate.
 
 The repository's devenv supplies Rust 1.89, `go-task`, and the configured
 pre-commit hooks. The package MSRV remains Rust 1.87, except for nalgebra 0.35
-(including the `nalgebra` alias), which requires Rust 1.89. Run
+(including the `nalgebra` alias), which requires Rust 1.89. The lockfile uses
+sprs 0.11.4 for Rust 1.87 compatibility; sprs 0.11.5 requires Rust 1.88. Run
 `bash scripts/test-backends.sh msrv` with Rust 1.87 to check the compatible
 feature selections, including tests, examples, and benchmarks.
 

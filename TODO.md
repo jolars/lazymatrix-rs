@@ -76,6 +76,9 @@ state and solver-specific update logic belong in consuming crates.
   - Test reconstruction of logical rows against a dense oracle.
 
 - [ ] Add CSR backend support when row access has a concrete consumer.
+  - sprs already supports CSC and CSR operators and statistics because its
+    matrix type stores orientation at runtime. `SprsCsc` checks CSC storage for
+    borrowed columns; row borrowing remains future work.
   - Cover faer `SparseRowMat` and nalgebra-sparse `CsrMatrix` if their APIs
     support the required operations cleanly.
   - Implement `MatrixShape`, `MatVec`, `MatTransposeVec`, `ColumnStats`, and

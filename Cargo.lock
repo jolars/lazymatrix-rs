@@ -1035,6 +1035,7 @@ dependencies = [
  "rand",
  "rand_chacha",
  "rayon",
+ "sprs",
 ]
 
 [[package]]
@@ -1941,6 +1942,18 @@ dependencies = [
  "equator 0.4.2",
  "loom",
  "rayon",
+]
+
+[[package]]
+name = "sprs"
+version = "0.11.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6dca58a33be2188d4edc71534f8bafa826e787cc28ca1c47f31be3423f0d6e55"
+dependencies = [
+ "ndarray 0.17.2",
+ "num-complex",
+ "num-traits",
+ "smallvec",
 ]
 
 [[package]]

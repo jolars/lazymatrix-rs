@@ -31,6 +31,9 @@
 //!   `nalgebra::DVector`.
 //! * `ndarray` — `ndarray::Array2` and borrowed, strided matrix views over
 //!   `ndarray::Array1`.
+//! * `sprs` — CSC and CSR `sprs::CsMat` matrices and borrowed views over `Vec`.
+//!   With an ndarray feature, also supports that release's `Array1` vectors.
+//!   `SprsCsc` checks CSC orientation for borrowed columns.
 //! * `parallel` — parallel column statistics through Rayon; also enables the
 //!   selected faer release's Rayon support.
 //!
@@ -42,6 +45,7 @@
 //! | faer | `faer_v0_22`, `faer_v0_23`, `faer_v0_24` | 0.24 |
 //! | nalgebra | `nalgebra_v0_32`, `nalgebra_v0_33`, `nalgebra_v0_34`, `nalgebra_v0_35` | 0.35 |
 //! | ndarray | `ndarray_v0_15`, `ndarray_v0_16`, `ndarray_v0_17` | 0.17 |
+//! | sprs | `sprs_v0_11` | 0.11 |
 //!
 //! If Cargo enables several releases of one backend, only the newest enabled
 //! release receives trait implementations. Select the same release line in
@@ -51,6 +55,8 @@
 //! The core and older backends require Rust 1.87. The `nalgebra` and
 //! `nalgebra_v0_35` features require Rust 1.89. The `nalgebra` feature previously
 //! selected 0.34; use `nalgebra_v0_34` to retain that release and Rust 1.87 support.
+//! The sprs backend supports Rust 1.87 with sprs 0.11.4, as locked in this
+//! repository. sprs 0.11.5 requires Rust 1.88.
 //!
 //! Any type implementing the [`traits`] surface (a dense matrix, say) works too.
 //!
@@ -94,6 +100,19 @@
 //! `to_owned()` first. Logical-column operations and reusable transpose products
 //! accept immutable vector views directly. Raw columns borrow in O(1) time;
 //! dense logical-column operations take O(nrows) time.
+//!
+//! sprs products and statistics work directly on either CSC or CSR storage.
+//! They visit stored entries without copying or materializing a normalized
+//! matrix. CSC statistics take O(ncols + nnz) time and support `parallel`;
+//! CSR statistics scan rows serially in O(nrows + ncols + nnz) time using
+//! O(ncols) workspace. `sprs` does not select an ndarray backend version.
+//!
+//! To borrow columns, pass CSC storage or a view to `SprsCsc::try_new` before
+//! constructing a `LazyMatrix`. The wrapper checks orientation in O(1) time
+//! without copying, and returns CSR inputs unchanged as `Err`. Logical columns
+//! accept any sprs index type; `SparseColumns` requires `usize` row indices.
+//! Raw columns borrow in O(1) time. A centered column dot takes
+//! O(nrows + nnz_column), or O(nnz_column) with `dot_with_sum`.
 
 // Cargo feature unification may enable several releases of one backend.
 // Only the newest enabled release receives trait implementations.
@@ -205,12 +224,20 @@ extern crate faer_traits;
 ))]
 compile_error!("`faer_all` is internal; enable `faer` or a `faer_v*` feature");
 
+#[cfg(feature = "sprs_v0_11")]
+extern crate sprs;
+
+#[cfg(all(feature = "sprs_all", not(feature = "sprs_v0_11")))]
+compile_error!("`sprs_all` is internal; enable `sprs` or a `sprs_v*` feature");
+
 mod backends;
 mod column;
 mod matrix;
 mod normalization;
 pub mod traits;
 
+#[cfg(feature = "sprs_all")]
+pub use backends::sprs::SprsCsc;
 pub use column::{LazyColumn, LazySparseColumn, SparseColumnRef};
 pub use matrix::LazyMatrix;
 pub use normalization::{Centering, Normalization, Scaling};

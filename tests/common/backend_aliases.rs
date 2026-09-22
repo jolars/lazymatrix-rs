@@ -1,5 +1,8 @@
 #![allow(clippy::single_component_path_imports, unused_imports)]
 
+#[cfg(feature = "sprs_v0_11")]
+pub(crate) use sprs;
+
 #[cfg(all(
     feature = "nalgebra_v0_32",
     not(any(
