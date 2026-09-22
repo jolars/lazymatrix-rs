@@ -30,6 +30,8 @@
 //!   [`faer::Col`].
 //! * `nalgebra` — [`nalgebra::DMatrix`] and [`nalgebra_sparse::CscMatrix`] over
 //!   [`nalgebra::DVector`].
+//! * `ndarray` — [`ndarray::Array2`] and borrowed, strided matrix views over
+//!   [`ndarray::Array1`] (ndarray 0.17).
 //! * `parallel` — parallel column statistics through Rayon and parallel Faer
 //!   sparse matrix–vector products when the `faer` feature is also enabled.
 //!
@@ -46,6 +48,31 @@
 //! let lazy = LazyMatrix::new(x, spec);
 //! let y = lazy.matvec(&v); // == ((X − 1cᵀ)S⁻¹) v, sparsity preserved
 //! ```
+//!
+//! With the `ndarray` feature, a matrix view borrows the original array:
+//!
+//! ```
+//! # #[cfg(feature = "ndarray")]
+//! # {
+//! use lazymatrix::{Centering, LazyMatrix, MatVec, Normalization, Scaling};
+//! use ndarray::array;
+//!
+//! let x = array![[1.0, 0.0], [2.0, 3.0], [0.0, 4.0]];
+//! let lazy = LazyMatrix::new(
+//!     x.view(),
+//!     Normalization::new(Centering::Mean, Scaling::Sd),
+//! );
+//! let y = lazy.matvec(&array![1.0, -1.0]);
+//! assert_eq!(y.len(), 3);
+//! # }
+//! ```
+//!
+//! Allocating ndarray products use owned `Array1` vectors. Reusable-output
+//! products also support mutable, strided destinations. Lazy forward products
+//! require a clonable, mutable input, so convert immutable input views with
+//! `to_owned()` first. Logical-column operations and reusable transpose products
+//! accept immutable vector views directly. Raw columns borrow in O(1) time;
+//! dense logical-column operations take O(nrows) time.
 
 mod backends;
 mod column;

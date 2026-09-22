@@ -1,32 +1,59 @@
 use crate::traits::Scalar;
 
 /// `Send` when parallelism is enabled, and unconstrained otherwise.
-#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    feature = "parallel",
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 pub(crate) trait MaybeSend: Send {}
 
-#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    feature = "parallel",
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 impl<T: Send + ?Sized> MaybeSend for T {}
 
-#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    not(feature = "parallel"),
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 pub(crate) trait MaybeSend {}
 
-#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    not(feature = "parallel"),
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 impl<T: ?Sized> MaybeSend for T {}
 
 /// `Sync` when parallelism is enabled, and unconstrained otherwise.
-#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    feature = "parallel",
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 pub(crate) trait MaybeSync: Sync {}
 
-#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    feature = "parallel",
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 impl<T: Sync + ?Sized> MaybeSync for T {}
 
-#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    not(feature = "parallel"),
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 pub(crate) trait MaybeSync {}
 
-#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    not(feature = "parallel"),
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 impl<T: ?Sized> MaybeSync for T {}
 
-#[cfg(all(feature = "parallel", any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    feature = "parallel",
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 pub(crate) fn collect_columns<T, Map>(ncols: usize, map: Map) -> Vec<T>
 where
     T: MaybeSend,
@@ -36,7 +63,10 @@ where
     (0..ncols).into_par_iter().map(map).collect()
 }
 
-#[cfg(all(not(feature = "parallel"), any(feature = "faer", feature = "nalgebra")))]
+#[cfg(all(
+    not(feature = "parallel"),
+    any(feature = "faer", feature = "nalgebra", feature = "ndarray")
+))]
 pub(crate) fn collect_columns<T, Map>(ncols: usize, map: Map) -> Vec<T>
 where
     T: MaybeSend,
@@ -73,7 +103,7 @@ pub(crate) fn sparse_column_sd<F: Scalar>(values: &[F], nrows: usize) -> F {
 }
 
 /// Returns the maximum of nonnegative values without masking `NaN` entries.
-#[cfg(any(feature = "faer", feature = "nalgebra"))]
+#[cfg(any(feature = "faer", feature = "nalgebra", feature = "ndarray"))]
 pub(crate) fn max_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
     values.fold(F::zero(), |maximum, value| {
         if maximum.is_nan() || value.is_nan() {
@@ -88,7 +118,7 @@ pub(crate) fn max_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
 
 /// Returns the minimum value, propagating `NaN` and treating an empty input as
 /// undefined.
-#[cfg(any(feature = "faer", feature = "nalgebra"))]
+#[cfg(any(feature = "faer", feature = "nalgebra", feature = "ndarray"))]
 pub(crate) fn min_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
     values
         .fold(None, |minimum: Option<F>, value| {
@@ -103,7 +133,7 @@ pub(crate) fn min_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
 
 /// Returns `max - min`, propagating `NaN` and treating an empty input as
 /// undefined.
-#[cfg(any(feature = "faer", feature = "nalgebra"))]
+#[cfg(any(feature = "faer", feature = "nalgebra", feature = "ndarray"))]
 pub(crate) fn range_or_nan<F: Scalar>(values: impl Iterator<Item = F>) -> F {
     values
         .fold(None, |extrema: Option<(F, F)>, value| {

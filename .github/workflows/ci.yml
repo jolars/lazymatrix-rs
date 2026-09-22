@@ -55,6 +55,10 @@ jobs:
             flags: "--features nalgebra"
           - features: faer
             flags: "--features faer"
+          - features: ndarray
+            flags: "--features ndarray"
+          - features: ndarray-parallel
+            flags: "--features ndarray,parallel"
           - features: all
             flags: "--all-features"
     steps:

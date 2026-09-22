@@ -26,12 +26,14 @@ coordinate descent.
 ## Install
 
 The core trait and operator API has no linear algebra dependency beyond
-`num-traits`. Enable a backend for ready-made dense and CSC implementations:
+`num-traits`. Enable a backend for ready-made matrix implementations:
 
 ```sh
 cargo add lazymatrix --features faer
 # or
 cargo add lazymatrix --features nalgebra
+# or, for dense arrays
+cargo add lazymatrix --features ndarray
 ```
 
 ## Example
@@ -56,8 +58,32 @@ let y = x.matvec(&DVector::from_vec(vec![1.0, -1.0]));
 ```
 
 The same interface works with faer and nalgebra dense matrices, their borrowed
-views, and CSC sparse matrices. See [`examples/`](examples/) for complete solver
-examples that consume the operator.
+views, and CSC sparse matrices. The `ndarray` feature supports ndarray 0.17 dense
+arrays, including borrowed, transposed, and strided views:
+
+```rust
+use lazymatrix::{Centering, LazyMatrix, MatVec, Normalization, Scaling};
+use ndarray::array;
+
+let x = array![[1.0, 0.0], [2.0, 3.0], [0.0, 4.0]];
+let lazy = LazyMatrix::new(
+    x.view(),
+    Normalization::new(Centering::Mean, Scaling::Sd),
+);
+let y = lazy.matvec(&array![1.0, -1.0]);
+```
+
+Allocating ndarray products use `Array1` vectors. Reusable-output products can
+write into mutable, strided vector views. A lazy forward product needs an owned
+input because it may clone and scale that input; call `to_owned()` on an
+immutable input view first. Logical-column operations and reusable transpose
+products accept immutable vector views directly. Borrowed column access preserves
+the original strides and takes O(1) time; dense logical-column operations take
+O(nrows) time.
+
+Enable `parallel` alongside a backend to compute column statistics with Rayon.
+See [`examples/`](examples/) for complete solver examples that consume the
+operator.
 
 ## License
 

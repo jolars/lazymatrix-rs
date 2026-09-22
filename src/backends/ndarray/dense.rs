@@ -1,0 +1,207 @@
+//! Matrix operations and column statistics for two-dimensional ndarray arrays.
+
+use ndarray::linalg::general_mat_vec_mul;
+use ndarray::{Array1, ArrayBase, ArrayView1, Data, DataMut, Ix1, Ix2};
+
+use crate::backends::support::{
+    MaybeSend, MaybeSync, collect_columns, max_or_nan, min_or_nan, range_or_nan,
+};
+use crate::traits::{
+    ColumnStats, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, RawColumns,
+    Scalar,
+};
+
+impl<S: Data> MatrixShape for ArrayBase<S, Ix2> {
+    fn nrows(&self) -> usize {
+        self.shape()[0]
+    }
+
+    fn ncols(&self) -> usize {
+        self.shape()[1]
+    }
+}
+
+impl<F, S> RawColumns<F> for ArrayBase<S, Ix2>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+{
+    type Column<'a>
+        = ArrayView1<'a, F>
+    where
+        Self: 'a;
+
+    fn raw_column(&self, j: usize) -> Self::Column<'_> {
+        assert!(j < self.ncols(), "column index out of bounds");
+        self.column(j)
+    }
+}
+
+impl<F, S> MatVec<Array1<F>> for ArrayBase<S, Ix2>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+{
+    fn matvec(&self, x: &Array1<F>) -> Array1<F> {
+        let mut out = Array1::zeros(self.nrows());
+        self.matvec_into(x, &mut out);
+        out
+    }
+}
+
+impl<F, S> MatTransposeVec<Array1<F>> for ArrayBase<S, Ix2>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+{
+    fn mat_transpose_vec(&self, x: &Array1<F>) -> Array1<F> {
+        let mut out = Array1::zeros(self.ncols());
+        self.mat_transpose_vec_into(x, &mut out);
+        out
+    }
+}
+
+impl<F, S, X, Y> MatVecInto<ArrayBase<X, Ix1>, ArrayBase<Y, Ix1>> for ArrayBase<S, Ix2>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+    X: Data<Elem = F>,
+    Y: DataMut<Elem = F>,
+{
+    fn matvec_into(&self, x: &ArrayBase<X, Ix1>, out: &mut ArrayBase<Y, Ix1>) {
+        assert_eq!(self.ncols(), x.len(), "matvec_into: dimension mismatch");
+        assert_eq!(
+            self.nrows(),
+            out.len(),
+            "matvec_into: output dimension mismatch"
+        );
+        general_mat_vec_mul(F::one(), self, x, F::zero(), out);
+    }
+}
+
+impl<F, S, X, Y> MatTransposeVecInto<ArrayBase<X, Ix1>, ArrayBase<Y, Ix1>> for ArrayBase<S, Ix2>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+    X: Data<Elem = F>,
+    Y: DataMut<Elem = F>,
+{
+    fn mat_transpose_vec_into(&self, x: &ArrayBase<X, Ix1>, out: &mut ArrayBase<Y, Ix1>) {
+        assert_eq!(
+            self.nrows(),
+            x.len(),
+            "mat_transpose_vec_into: dimension mismatch"
+        );
+        assert_eq!(
+            self.ncols(),
+            out.len(),
+            "mat_transpose_vec_into: output dimension mismatch"
+        );
+        general_mat_vec_mul(F::one(), &self.t(), x, F::zero(), out);
+    }
+}
+
+impl<F, S> ColumnStats<F> for ArrayBase<S, Ix2>
+where
+    F: Scalar + MaybeSend + MaybeSync,
+    S: Data<Elem = F> + MaybeSync,
+{
+    fn col_means(&self) -> Vec<F> {
+        let n = F::from_usize(self.nrows()).unwrap();
+        collect_columns(self.ncols(), |j| {
+            self.column(j).iter().copied().sum::<F>() / n
+        })
+    }
+
+    fn col_sds(&self) -> Vec<F> {
+        let centers = self.col_means();
+        let n = F::from_usize(self.nrows()).unwrap();
+        collect_columns(self.ncols(), |j| {
+            (self
+                .column(j)
+                .iter()
+                .map(|&value| {
+                    let deviation = value - centers[j];
+                    deviation * deviation
+                })
+                .sum::<F>()
+                / n)
+                .sqrt()
+        })
+    }
+
+    fn col_mins(&self) -> Vec<F> {
+        collect_columns(self.ncols(), |j| min_or_nan(self.column(j).iter().copied()))
+    }
+
+    fn col_ranges(&self) -> Vec<F> {
+        collect_columns(self.ncols(), |j| {
+            range_or_nan(self.column(j).iter().copied())
+        })
+    }
+
+    fn col_maxabs(&self) -> Vec<F> {
+        collect_columns(self.ncols(), |j| {
+            max_or_nan(self.column(j).iter().map(|x| x.abs()))
+        })
+    }
+
+    fn col_l1(&self) -> Vec<F> {
+        collect_columns(self.ncols(), |j| {
+            self.column(j).iter().map(|x| x.abs()).sum()
+        })
+    }
+
+    fn col_l2(&self) -> Vec<F> {
+        collect_columns(self.ncols(), |j| {
+            self.column(j).iter().map(|&x| x * x).sum::<F>().sqrt()
+        })
+    }
+
+    fn col_l2_centered(&self, centers: &[F]) -> Vec<F> {
+        assert_eq!(
+            centers.len(),
+            self.ncols(),
+            "col_l2_centered: length mismatch"
+        );
+        collect_columns(self.ncols(), |j| {
+            self.column(j)
+                .iter()
+                .map(|&value| {
+                    let value = value - centers[j];
+                    value * value
+                })
+                .sum::<F>()
+                .sqrt()
+        })
+    }
+
+    fn col_l1_centered(&self, centers: &[F]) -> Vec<F> {
+        assert_eq!(
+            centers.len(),
+            self.ncols(),
+            "col_l1_centered: length mismatch"
+        );
+        collect_columns(self.ncols(), |j| {
+            self.column(j)
+                .iter()
+                .map(|&value| (value - centers[j]).abs())
+                .sum()
+        })
+    }
+
+    fn col_maxabs_centered(&self, centers: &[F]) -> Vec<F> {
+        assert_eq!(
+            centers.len(),
+            self.ncols(),
+            "col_maxabs_centered: length mismatch"
+        );
+        collect_columns(self.ncols(), |j| {
+            max_or_nan(
+                self.column(j)
+                    .iter()
+                    .map(|&value| (value - centers[j]).abs()),
+            )
+        })
+    }
+}

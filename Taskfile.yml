@@ -35,4 +35,6 @@ tasks:
       - cargo test --locked
       - cargo test --locked --features nalgebra
       - cargo test --locked --features faer
+      - cargo test --locked --features ndarray
+      - cargo test --locked --features ndarray,parallel
       - cargo test --locked --all-features

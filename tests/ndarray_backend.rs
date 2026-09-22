@@ -1,0 +1,207 @@
+#![cfg(feature = "ndarray")]
+//! Verification of ndarray arrays and strided views against the dense oracle.
+
+#[path = "common/runner.rs"]
+mod common;
+
+use common::{TestMatrix, assert_close, dense_matvec, dense_tmatvec, materialize};
+use lazymatrix::{
+    Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, LazyMatrix,
+    MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, Normalization, ScaleAssign,
+    ScaledAddAssign, ScaledSubSlice, Scaling, SubScalarAssign, SumEntries, VectorView,
+    VectorViewMut,
+};
+use ndarray::{Array1, Array2, ArrayView2, ShapeBuilder, array, s};
+
+fn build(tm: &TestMatrix) -> Array2<f64> {
+    Array2::from_shape_fn((tm.nrows, tm.ncols), |(i, j)| tm.dense[i][j])
+}
+
+fn build_fortran(tm: &TestMatrix) -> Array2<f64> {
+    Array2::from_shape_fn((tm.nrows, tm.ncols).f(), |(i, j)| tm.dense[i][j])
+}
+
+#[test]
+fn ndarray_backend_suite() {
+    for build in [build, build_fortran] {
+        common::run_backend_suite(build, |v| Array1::from_vec(v.to_vec()), |v| v.to_vec());
+        common::run_logical_columns_suite(build);
+    }
+}
+
+fn check_matrix_view(matrix: ArrayView2<'_, f64>) {
+    let dense: Vec<Vec<_>> = matrix.rows().into_iter().map(|row| row.to_vec()).collect();
+    let v = Array1::from_vec(common::random_vec(51, matrix.ncols()));
+    let u = Array1::from_vec(common::random_vec(52, matrix.nrows()));
+    for center in [Centering::None, Centering::Mean, Centering::Min] {
+        for scale in [
+            Scaling::None,
+            Scaling::Sd,
+            Scaling::L1,
+            Scaling::L2,
+            Scaling::MaxAbs,
+            Scaling::Range,
+        ] {
+            let spec = Normalization::new(center, scale);
+            let lazy = LazyMatrix::new(matrix, spec);
+            let reference = LazyMatrix::new(matrix.to_owned(), spec);
+            assert_eq!(lazy.centers(), reference.centers());
+            assert_eq!(lazy.scales(), reference.scales());
+            let normalized = materialize(&dense, lazy.centers(), lazy.scales());
+            assert_close(
+                &lazy.matvec(&v).to_vec(),
+                &dense_matvec(&normalized, &v.to_vec()),
+                1e-10,
+            );
+            assert_close(
+                &lazy.mat_transpose_vec(&u).to_vec(),
+                &dense_tmatvec(&normalized, &u.to_vec()),
+                1e-10,
+            );
+            for j in 0..matrix.ncols() {
+                let column = lazy.column(j);
+                assert_eq!(column.raw().as_ptr(), &matrix[(0, j)] as *const f64);
+                assert_eq!(column.raw().strides()[0], matrix.strides()[0]);
+                let expected: f64 = normalized.iter().zip(&u).map(|(row, u)| row[j] * u).sum();
+                approx::assert_abs_diff_eq!(column.dot(&u.view()), expected, epsilon = 1e-10);
+            }
+        }
+    }
+}
+
+#[test]
+fn ndarray_matrix_views_preserve_strides_and_borrow_storage() {
+    let mut storage = Array2::from_shape_fn((8, 6), |(i, j)| (i * 6 + j) as f64 - 10.0);
+    check_matrix_view(storage.view());
+    check_matrix_view(storage.t());
+    check_matrix_view(storage.slice(s![1..;2, ..;2]));
+    check_matrix_view(storage.slice(s![..;-1, ..;-1]));
+    let row = array![1.0, 2.0, 3.0];
+    check_matrix_view(row.broadcast((4, 3)).unwrap());
+
+    let lazy = LazyMatrix::new(
+        storage.view_mut(),
+        Normalization::new(Centering::Mean, Scaling::L2),
+    );
+    assert_eq!(lazy.nrows(), 8);
+    assert_eq!(lazy.column(0).len(), 8);
+}
+
+#[test]
+fn ndarray_strided_inputs_and_outputs_match_dense_oracle() {
+    let matrix = array![[1.0, 0.0], [2.0, 3.0], [-1.0, 4.0]];
+    let dense = vec![vec![1.0, 0.0], vec![2.0, 3.0], vec![-1.0, 4.0]];
+    let input_storage = array![2.0, -99.0, -1.0];
+    let input = input_storage.slice(s![..;2]);
+    let row_storage = array![3.0, -99.0, 2.0, -99.0, 1.0];
+    let rows = row_storage.slice(s![..;-2]);
+    let weights = row_storage.slice(s![..;2]);
+
+    let mut raw_output = Array1::from_elem(6, f64::NAN);
+    matrix.matvec_into(&input, &mut raw_output.slice_mut(s![..;-2]));
+    assert_close(
+        &raw_output.slice(s![..;-2]).to_vec(),
+        &[2.0, 1.0, -6.0],
+        1e-12,
+    );
+
+    for center in [false, true] {
+        for scale in [false, true] {
+            let lazy = LazyMatrix::from_parts(
+                matrix.view(),
+                center.then(|| vec![0.5, -1.0]),
+                scale.then(|| vec![2.0, 4.0]),
+            );
+            let normalized = materialize(&dense, lazy.centers(), lazy.scales());
+            let mut output = Array1::from_elem(6, -99.0);
+            output.slice_mut(s![..;-2]).fill(f64::NAN);
+            let owned_input = input.to_owned();
+            lazy.matvec_into(&owned_input, &mut output.slice_mut(s![..;-2]));
+            assert_close(
+                &output.slice(s![..;-2]).to_vec(),
+                &dense_matvec(&normalized, &input.to_vec()),
+                1e-12,
+            );
+            assert_eq!(output.slice(s![..;2]).to_vec(), vec![-99.0; 3]);
+            assert_eq!(owned_input.to_vec(), input.to_vec());
+
+            let mut transpose_output = array![-99.0, f64::NAN, -99.0, f64::NAN];
+            lazy.mat_transpose_vec_into(&rows, &mut transpose_output.slice_mut(s![1..;2]));
+            assert_close(
+                &transpose_output.slice(s![1..;2]).to_vec(),
+                &dense_tmatvec(&normalized, &rows.to_vec()),
+                1e-12,
+            );
+            assert_eq!(transpose_output.slice(s![..;2]).to_vec(), vec![-99.0; 2]);
+
+            let column = lazy.column(1);
+            let expected_dot: f64 = (0..3)
+                .map(|i| normalized[i][1] * rows[i] * weights[i])
+                .sum();
+            approx::assert_abs_diff_eq!(
+                column.weighted_dot(&rows, &weights),
+                expected_dot,
+                epsilon = 1e-12
+            );
+            let expected_norm: f64 = (0..3).map(|i| normalized[i][1].powi(2) * weights[i]).sum();
+            approx::assert_abs_diff_eq!(
+                column.weighted_norm_squared(&weights),
+                expected_norm,
+                epsilon = 1e-12
+            );
+            let mut destination = Array1::from_elem(6, 1.0);
+            column.scaled_add_to(-0.5, &mut destination.slice_mut(s![..;-2]));
+            let expected: Vec<_> = normalized.iter().map(|row| 1.0 - 0.5 * row[1]).collect();
+            assert_close(&destination.slice(s![..;-2]).to_vec(), &expected, 1e-12);
+            assert_eq!(destination.slice(s![..;2]).to_vec(), vec![1.0; 3]);
+        }
+    }
+}
+
+#[test]
+fn ndarray_vector_traits_follow_logical_order() {
+    let storage = array![3.0, -99.0, 4.0];
+    let view = storage.slice(s![..;-2]);
+    assert_eq!(VectorView::len(&view), 2);
+    assert_eq!(VectorView::get(&view, 0), 4.0);
+    assert_eq!(view.sum_entries(), 7.0);
+    assert_eq!(view.dot_slice(&[2.0, 1.0]), 11.0);
+    assert_eq!(DotProduct::dot(&view, &view), 25.0);
+    assert_eq!(view.norm_l2(), 5.0);
+
+    let mut destination = array![3.0, -99.0, 4.0];
+    let mut other_storage = array![2.0, -99.0, 1.0];
+    {
+        let mut view = destination.slice_mut(s![..;-2]);
+        view.scaled_add_assign(2.0, &other_storage.slice_mut(s![..;-2]));
+        view.scale_assign(2.0);
+        view.elem_div_assign(&[3.0, 7.0]);
+        view.sub_scalar_assign(1.0);
+        view.scaled_sub_slice(0.5, &[2.0, 4.0]);
+        assert_eq!(view.to_vec(), vec![2.0, -1.0]);
+        VectorViewMut::set(&mut view, 1, 8.0);
+    }
+    assert_eq!(destination.to_vec(), vec![8.0, -99.0, 2.0]);
+}
+
+#[test]
+fn ndarray_f32_normalization_and_products() {
+    let matrix = array![[1.0_f32, 3.0], [3.0, 3.0]];
+    let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd));
+    assert_eq!(lazy.centers(), Some([2.0, 3.0].as_slice()));
+    assert_eq!(lazy.scales(), Some([1.0, 1.0].as_slice()));
+    assert_eq!(lazy.matvec(&array![2.0, 1.0]).to_vec(), vec![-2.0, 2.0]);
+    assert_eq!(
+        lazy.mat_transpose_vec(&array![1.0, 2.0]).to_vec(),
+        vec![1.0, 0.0]
+    );
+}
+
+#[test]
+fn ndarray_infinite_statistics_preserve_ieee_values() {
+    let matrix = array![[f64::INFINITY, f64::NEG_INFINITY], [1.0, 1.0]];
+    assert_eq!(matrix.col_means(), vec![f64::INFINITY, f64::NEG_INFINITY]);
+    assert!(matrix.col_sds().iter().all(|x| x.is_nan()));
+    assert_eq!(matrix.col_maxabs(), vec![f64::INFINITY; 2]);
+    assert_eq!(matrix.col_ranges(), vec![f64::INFINITY; 2]);
+}

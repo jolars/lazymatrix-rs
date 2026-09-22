@@ -14,8 +14,8 @@ re-exports. The main implementation is divided as follows:
 - `src/traits/vectors.rs`, `stats.rs`, and `columns.rs` define vector algebra,
   sparse-aware statistics, and column capabilities.
 - `src/backends/faer/` and `src/backends/nalgebra/` contain feature-gated dense,
-  sparse, and vector implementations. Shared helpers live in
-  `src/backends/support.rs`.
+  sparse, and vector implementations. `src/backends/ndarray/` contains dense
+  matrix and vector implementations. Shared helpers live in `src/backends/support.rs`.
 
 Keep backend-independent logic out of backend implementation directories. With
 no features enabled, the crate provides its traits and `LazyMatrix` with only
@@ -86,7 +86,7 @@ sums, update rules, or an entire solver to the crate.
 ## Build, Test, and Development Commands
 
 - `cargo build --locked` builds the dependency-light core.
-- `cargo build --all-features --locked` checks both supported backends.
+- `cargo build --all-features --locked` checks all supported backends.
 - `task test` runs the core, each backend, and the all-feature test matrix.
 - `task ci` runs formatting, Clippy, documentation, and all tests—the local
   equivalent of GitHub CI.
