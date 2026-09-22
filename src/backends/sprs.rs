@@ -1,9 +1,11 @@
-//! Sparse operators for sprs CSC and CSR matrices, with checked CSC borrowing.
+//! Sparse operators for sprs CSC and CSR matrices, with checked borrowing.
 
 mod csc;
+mod csr;
 mod stats;
 
 pub use csc::SprsCsc;
+pub use csr::SprsCsr;
 
 use std::ops::Deref;
 

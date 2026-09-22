@@ -9,9 +9,9 @@ use backend_aliases::*;
 mod common;
 
 use common::TestMatrix;
-use lazymatrix::{Centering, LazyMatrix, Normalization, Scaling};
+use lazymatrix::{Centering, LazyMatrix, Normalization, Scaling, SparseRows};
 use nalgebra::{DMatrix, DMatrixView, DVector, DVectorView, DVectorViewMut, Dyn};
-use nalgebra_sparse::{CooMatrix, CscMatrix};
+use nalgebra_sparse::{CooMatrix, CscMatrix, CsrMatrix};
 
 fn build(tm: &TestMatrix) -> CscMatrix<f64> {
     let mut coo = CooMatrix::new(tm.nrows, tm.ncols);
@@ -40,6 +40,34 @@ fn nalgebra_backend_suite() {
     common::run_logical_columns_suite(build);
     common::run_backend_suite(build_dense, to_dvec, from_dvec);
     common::run_logical_columns_suite(build_dense);
+}
+
+#[test]
+fn nalgebra_sparse_rows_suite() {
+    common::run_sparse_rows_suite(|tm| {
+        let mut coo = CooMatrix::new(tm.nrows, tm.ncols);
+        for &(i, j, value) in &tm.triplets {
+            coo.push(i, j, value);
+        }
+        CsrMatrix::from(&coo)
+    });
+}
+
+#[test]
+fn nalgebra_sparse_rows_borrow_original_storage() {
+    let matrix = CsrMatrix::try_from_csr_data(
+        3,
+        4,
+        vec![0, 1, 3, 3],
+        vec![2, 0, 3],
+        vec![1.0_f32, 0.0, -2.0],
+    )
+    .unwrap();
+    let (columns, values) = matrix.sparse_row(1);
+    assert_eq!(columns, &[0, 3]);
+    assert_eq!(values, &[0.0, -2.0]);
+    assert_eq!(columns.as_ptr(), matrix.col_indices()[1..].as_ptr());
+    assert_eq!(values.as_ptr(), matrix.values()[1..].as_ptr());
 }
 
 #[test]

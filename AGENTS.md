@@ -13,10 +13,11 @@ re-exports. The main implementation is divided as follows:
   reusable-output matrix-vector products.
 - `src/traits/vectors.rs`, `stats.rs`, and `columns.rs` define vector algebra,
   sparse-aware statistics, and column capabilities.
+- `src/traits/rows.rs` defines the contiguous sparse-row borrowing capability.
 - `src/backends/faer/` and `src/backends/nalgebra/` contain feature-gated dense,
   sparse, and vector implementations. `src/backends/ndarray/` contains dense
   matrix and vector implementations. `src/backends/sprs/` contains sparse
-  statistics and the checked `SprsCsc` column wrapper; `src/backends/sprs.rs`
+  statistics and the checked `SprsCsc` and `SprsCsr` wrappers; `src/backends/sprs.rs`
   implements CSC and CSR products. Shared helpers live in `src/backends/support.rs`.
 
 Keep backend-independent logic out of backend implementation directories. With
@@ -69,6 +70,7 @@ a capability:
 - `MatVec`, `MatTransposeVec`, and `ColumnStats` are orientation-agnostic.
 - Dense backends and storage with natural column views implement `RawColumns`.
 - Only storage that can borrow contiguous CSC slices implements `SparseColumns`.
+- Only storage that can borrow contiguous CSR slices implements `SparseRows`.
 
 `LazyMatrix::column(j)` requires `RawColumns`; `sparse_column(j)` retains the
 stronger `SparseColumns` bound. Do not hide an O(nnz)-per-column gather behind
@@ -83,9 +85,13 @@ normalization formulas. Keep raw slices available for specialized algorithms,
 and document complexity: a centered dot requiring a dense vector sum is O(n +
 nnz), while a cached-sum path is O(nnz). sprs supports CSC and CSR operators
 directly because orientation is a runtime flag. Only the checked `SprsCsc`
-wrapper implements column borrowing; `SparseColumns` additionally requires
-`usize` row indices. Row views, `SparseRows`, and faer and nalgebra CSR
-backends remain prospective work described in `TODO.md`.
+wrapper implements column borrowing; `SprsCsr` checks CSR storage for row
+borrowing. `SparseColumns` and `SparseRows` require `usize` row and column
+indices, respectively. faer CSR matrices and views and nalgebra CSR matrices
+provide `MatrixShape` and `SparseRows`; use faer's row ranges to exclude spare
+capacity and sprs's adjusted outer ranges for sliced views. Normalized row views
+and faer and nalgebra CSR operators and statistics remain prospective work
+described in `TODO.md`.
 
 ## Example-Driven Design
 

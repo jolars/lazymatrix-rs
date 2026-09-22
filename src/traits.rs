@@ -23,6 +23,7 @@
 //!   backend and normalized sides of storage-independent column access.
 //! * [`SparseColumns`] — the stronger borrowed access capability for
 //!   contiguous sparse columns.
+//! * [`SparseRows`] — borrowed access to contiguous sparse rows.
 
 /// Numeric scalar element type.
 ///
@@ -36,12 +37,14 @@ pub trait Scalar:
 
 mod columns;
 mod operator;
+mod rows;
 mod stats;
 mod vectors;
 
 pub use crate::normalization::{Centering, Normalization, Scaling};
 pub use columns::{Columns, LogicalColumn, RawColumn, RawColumns, SparseColumns};
 pub use operator::{MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape};
+pub use rows::SparseRows;
 pub use stats::ColumnStats;
 pub use vectors::{
     DotProduct, DotSlice, ElemDivAssign, L2Norm, ScaleAssign, ScaledAddAssign, ScaledSubSlice,

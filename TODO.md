@@ -62,10 +62,12 @@ state and solver-specific update logic belong in consuming crates.
     be sparse.
   - Test reconstruction of logical columns against a dense oracle.
 
-- [ ] Add `SparseRows` for contiguous CSR row access.
+- [x] Add `SparseRows` for contiguous CSR row access.
   - Return borrowed column-index and raw-value slices without copying.
   - Implement it only for storage types that provide efficient contiguous row
     access; do not gather rows from CSC under this trait.
+  - Support faer CSR matrices and views, nalgebra-sparse CSR matrices, and
+    checked `SprsCsr` matrices and views, with `usize` column indices.
 
 - [ ] Add `LazyMatrix::row` and a borrowed `LazyRow` view.
   - Gate the method on `M: SparseRows`.
@@ -75,14 +77,13 @@ state and solver-specific update logic belong in consuming crates.
     generally dense even when its raw row is sparse.
   - Test reconstruction of logical rows against a dense oracle.
 
-- [ ] Add CSR backend support when row access has a concrete consumer.
+- [ ] Complete CSR operator and statistics support when it has a concrete consumer.
   - sprs already supports CSC and CSR operators and statistics because its
-    matrix type stores orientation at runtime. `SprsCsc` checks CSC storage for
-    borrowed columns; row borrowing remains future work.
-  - Cover faer `SparseRowMat` and nalgebra-sparse `CsrMatrix` if their APIs
-    support the required operations cleanly.
-  - Implement `MatrixShape`, `MatVec`, `MatTransposeVec`, `ColumnStats`, and
-    `SparseRows`.
+    matrix type stores orientation at runtime. `SprsCsc` and `SprsCsr` check
+    storage orientation for borrowed columns and rows, respectively.
+  - faer `SparseRowMat` and nalgebra-sparse `CsrMatrix` already implement
+    `MatrixShape` and `SparseRows`. Add `MatVec`, `MatTransposeVec`, their
+    reusable-output counterparts, and `ColumnStats` when needed.
   - Reuse the backend-generic oracle and adjoint tests.
   - Do not implement `SparseColumns` by performing an expensive gather.
 

@@ -11,7 +11,7 @@ mod common;
 use common::{TestMatrix, assert_close};
 use lazymatrix::{
     Centering, ColumnStats, LazyMatrix, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto,
-    Normalization, Scaling, SparseColumns, SprsCsc,
+    Normalization, Scaling, SparseColumns, SparseRows, SprsCsc, SprsCsr,
 };
 use sprs::{CsMat, CsMatI, TriMat};
 
@@ -28,6 +28,12 @@ fn sprs_backend_suite() {
     common::run_backend_suite(build, |v| v.to_vec(), Clone::clone);
     common::run_backend_suite(|tm| build(tm).to_csr(), |v| v.to_vec(), Clone::clone);
     common::run_backend_suite(
+        |tm| SprsCsr::try_new(build(tm).to_csr()).unwrap(),
+        |v| v.to_vec(),
+        Clone::clone,
+    );
+    common::run_sparse_rows_suite(|tm| SprsCsr::try_new(build(tm).to_csr()).unwrap());
+    common::run_backend_suite(
         |tm| SprsCsc::try_new(build(tm)).unwrap(),
         |v| v.to_vec(),
         Clone::clone,
@@ -41,6 +47,71 @@ fn sprs_backend_suite() {
         }
         SprsCsc::try_new(triplets.to_csc::<u64>()).unwrap()
     });
+}
+
+#[test]
+fn sprs_csr_wrapper_checks_orientation_and_borrows_sliced_rows() {
+    let matrix = CsMat::new(
+        (3, 4),
+        vec![0, 1, 3, 4],
+        vec![0, 1, 3, 2],
+        vec![5.0, 0.0, 2.0, -1.0],
+    );
+    let data_ptr = matrix.data().as_ptr();
+    let indices_ptr = matrix.indices().as_ptr();
+    let wrapped = SprsCsr::try_new(matrix).unwrap();
+    assert_eq!(wrapped.as_inner().data().as_ptr(), data_ptr);
+    let mut matrix = wrapped.into_inner();
+    assert_eq!(matrix.indices().as_ptr(), indices_ptr);
+    let wrapped = SprsCsr::try_new(matrix.slice_outer(1..3)).unwrap();
+    let (columns, values) = wrapped.sparse_row(0);
+    assert_eq!(columns, &[1, 3]);
+    assert_eq!(values, &[0.0, 2.0]);
+    assert_eq!(columns.as_ptr(), matrix.indices()[1..].as_ptr());
+    assert_eq!(values.as_ptr(), matrix.data()[1..].as_ptr());
+    assert_eq!(wrapped.as_inner().rows(), 2);
+    assert_eq!(wrapped.sparse_row(1), (&[2][..], &[-1.0][..]));
+
+    let wrapped = SprsCsr::try_new(matrix.view_mut()).unwrap();
+    assert_eq!(wrapped.sparse_row(0).1.as_ptr(), data_ptr);
+    let mut recovered = wrapped.into_inner();
+    recovered.data_mut()[0] = 7.0;
+    assert_eq!(matrix.data()[0], 7.0);
+
+    let csc = matrix.to_csc();
+    let data_ptr = csc.data().as_ptr();
+    let rejected = SprsCsr::try_new(csc).unwrap_err();
+    assert!(rejected.is_csc());
+    assert_eq!(rejected.data().as_ptr(), data_ptr);
+    let wrapped = SprsCsr::try_new(rejected.transpose_view()).unwrap();
+    for i in 0..rejected.cols() {
+        let range = rejected.indptr().outer_inds_sz(i);
+        let (columns, values) = wrapped.sparse_row(i);
+        assert_eq!(columns, &rejected.indices()[range.clone()]);
+        assert_eq!(values.as_ptr(), rejected.data()[range].as_ptr());
+    }
+}
+
+#[test]
+fn sprs_csr_wrapper_supports_alternate_index_and_pointer_widths() {
+    let matrix =
+        CsMatI::<f32, usize, u64>::new((2, 3), vec![0, 1, 3], vec![1, 0, 2], vec![2.0, 0.0, -1.0]);
+    let wrapped = SprsCsr::try_new(matrix.view()).unwrap();
+    assert_eq!(wrapped.sparse_row(1), (&[0, 2][..], &[0.0, -1.0][..]));
+    assert_eq!(
+        wrapped.sparse_row(1).0.as_ptr(),
+        matrix.indices()[1..].as_ptr()
+    );
+    assert_eq!(
+        wrapped.sparse_row(1).1.as_ptr(),
+        matrix.data()[1..].as_ptr()
+    );
+
+    let narrow =
+        CsMatI::<f32, u32, u64>::new((2, 3), vec![0, 1, 3], vec![1, 0, 2], vec![2.0, 0.0, -1.0]);
+    let wrapped = SprsCsr::try_new(narrow).unwrap();
+    assert_eq!(wrapped.matvec(&vec![1.0, 2.0, 3.0]), vec![4.0, -3.0]);
+    assert_eq!(wrapped.col_means(), vec![0.0, 1.0, -0.5]);
 }
 
 #[test]
@@ -246,10 +317,21 @@ fn sprs_ndarray_vectors_and_strided_destinations() {
         |v| Array1::from_vec(v.to_vec()),
         |v| v.to_vec(),
     );
+    common::run_backend_suite(
+        |tm| SprsCsr::try_new(build(tm).to_csr()).unwrap(),
+        |v| Array1::from_vec(v.to_vec()),
+        |v| v.to_vec(),
+    );
     let matrix = CsMat::new_csc((3, 2), vec![0, 1, 2], vec![0, 2], vec![2.0, -1.0]);
     let storage = array![1.0, -99.0, 2.0];
     let mut out = Array1::from_elem(6, f64::NAN);
     matrix.matvec_into(&storage.slice(s![..;-2]), &mut out.slice_mut(s![..;-2]));
+    assert_eq!(out.slice(s![..;-2]).to_vec(), vec![4.0, 0.0, -1.0]);
+    assert!(out.slice(s![..;2]).iter().all(|v| v.is_nan()));
+
+    let csr = SprsCsr::try_new(matrix.to_csr()).unwrap();
+    out.fill(f64::NAN);
+    csr.matvec_into(&storage.slice(s![..;-2]), &mut out.slice_mut(s![..;-2]));
     assert_eq!(out.slice(s![..;-2]).to_vec(), vec![4.0, 0.0, -1.0]);
     assert!(out.slice(s![..;2]).iter().all(|v| v.is_nan()));
 

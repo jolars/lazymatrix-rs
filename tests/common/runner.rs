@@ -9,7 +9,7 @@ use lazymatrix::{
     Centering, ColumnStats, DotProduct, DotSlice, ElemDivAssign, L2Norm, LazyMatrix,
     LazySparseColumn, MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape,
     Normalization, RawColumns, ScaleAssign, ScaledAddAssign, ScaledSubSlice, Scaling,
-    SparseColumns, SubScalarAssign, SumEntries,
+    SparseColumns, SparseRows, SubScalarAssign, SumEntries,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -288,6 +288,68 @@ where
     lazy_column_operations_handle_nonfinite_values(&build);
     empty_and_out_of_bounds_columns(&build);
     cached_sparse_products_touch_only_stored_rows(&build);
+}
+
+/// Run the verification suite for backends with contiguous sparse rows.
+pub fn run_sparse_rows_suite<M: SparseRows<f64>>(build: impl Fn(&TestMatrix) -> M) {
+    let explicit_zeros = TestMatrix {
+        nrows: 4,
+        ncols: 6,
+        dense: vec![
+            vec![0.0, 1.0, 0.0, 0.0, -2.0, 0.0],
+            vec![0.0; 6],
+            vec![3.0, 0.0, 4.0, 0.0, 0.0, 0.0],
+            vec![0.0; 6],
+        ],
+        triplets: vec![
+            (0, 1, 1.0),
+            (0, 2, 0.0),
+            (0, 4, -2.0),
+            (2, 0, 3.0),
+            (2, 2, 4.0),
+            (3, 5, 0.0),
+        ],
+    };
+    let matrix = build(&explicit_zeros);
+    assert_eq!(
+        matrix.sparse_row(0),
+        (&[1, 2, 4][..], &[1.0, 0.0, -2.0][..])
+    );
+    assert_eq!(matrix.sparse_row(1), (&[][..], &[][..]));
+    assert_eq!(matrix.sparse_row(3), (&[5][..], &[0.0][..]));
+
+    for tm in [
+        explicit_zeros,
+        random_matrix(71, 8, 5, 0.4),
+        random_matrix(72, 3, 9, 0.7),
+        random_matrix(73, 0, 4, 0.0),
+        random_matrix(74, 4, 0, 0.0),
+        random_matrix(75, 0, 0, 0.0),
+    ] {
+        let matrix = build(&tm);
+        assert_eq!(matrix.nrows(), tm.nrows);
+        assert_eq!(matrix.ncols(), tm.ncols);
+        for i in 0..tm.nrows {
+            let (columns, values) = matrix.sparse_row(i);
+            assert_eq!(columns.len(), values.len());
+            let mut dense = vec![0.0; tm.ncols];
+            for (&j, &value) in columns.iter().zip(values) {
+                dense[j] += value;
+            }
+            assert_close(&dense, &tm.dense[i], EPS);
+            let borrowed = &matrix;
+            let (borrowed_columns, borrowed_values) =
+                <&M as SparseRows<f64>>::sparse_row(&borrowed, i);
+            assert_eq!(borrowed_columns.as_ptr(), columns.as_ptr());
+            assert_eq!(borrowed_values.as_ptr(), values.as_ptr());
+        }
+        for i in [tm.nrows, usize::MAX] {
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| { matrix.sparse_row(i) }))
+                    .is_err()
+            );
+        }
+    }
 }
 
 struct CountingView<'a> {

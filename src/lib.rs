@@ -33,7 +33,8 @@
 //!   `ndarray::Array1`.
 //! * `sprs` — CSC and CSR `sprs::CsMat` matrices and borrowed views over `Vec`.
 //!   With an ndarray feature, also supports that release's `Array1` vectors.
-//!   `SprsCsc` checks CSC orientation for borrowed columns.
+//!   `SprsCsc` checks CSC orientation for borrowed columns; `SprsCsr` checks
+//!   CSR orientation for borrowed rows.
 //! * `parallel` — parallel column statistics through Rayon; also enables the
 //!   selected faer release's Rayon support.
 //!
@@ -113,6 +114,17 @@
 //! accept any sprs index type; `SparseColumns` requires `usize` row indices.
 //! Raw columns borrow in O(1) time. A centered column dot takes
 //! O(nrows + nnz_column), or O(nnz_column) with `dot_with_sum`.
+//!
+//! [`SparseRows`] borrows raw column-index and value slices from CSR storage in
+//! O(1) time, preserving explicitly stored zeros. It is available for faer's
+//! `SparseRowMat`, `SparseRowMatRef`, and `SparseRowMatMut` with `usize` indices,
+//! and nalgebra-sparse's `CsrMatrix`. These CSR types provide shape and raw row
+//! access; their operator and column-statistics implementations remain future
+//! work. With sprs, wrap a CSR matrix or view in `SprsCsr::try_new`. The wrapper
+//! returns CSC inputs unchanged as `Err` and forwards existing products and
+//! statistics. Borrowing rows requires `usize` column indices, while pointer
+//! indices may use any supported width. The slices describe the original
+//! matrix, before normalization; normalized row views remain future work.
 
 // Cargo feature unification may enable several releases of one backend.
 // Only the newest enabled release receives trait implementations.
@@ -237,13 +249,13 @@ mod normalization;
 pub mod traits;
 
 #[cfg(feature = "sprs_all")]
-pub use backends::sprs::SprsCsc;
+pub use backends::sprs::{SprsCsc, SprsCsr};
 pub use column::{LazyColumn, LazySparseColumn, SparseColumnRef};
 pub use matrix::LazyMatrix;
 pub use normalization::{Centering, Normalization, Scaling};
 pub use traits::{
     ColumnStats, Columns, DotProduct, DotSlice, ElemDivAssign, L2Norm, LogicalColumn,
     MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixShape, RawColumn, RawColumns,
-    Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns, SubScalarAssign,
-    SumEntries, VectorView, VectorViewMut,
+    Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns, SparseRows,
+    SubScalarAssign, SumEntries, VectorView, VectorViewMut,
 };

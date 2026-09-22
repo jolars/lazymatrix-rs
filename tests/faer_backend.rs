@@ -9,9 +9,10 @@ use backend_aliases::*;
 mod common;
 
 use common::TestMatrix;
-use faer::sparse::{SparseColMat, Triplet};
+use faer::prelude::ReborrowMut;
+use faer::sparse::{SparseColMat, SparseRowMat, SymbolicSparseRowMat, Triplet};
 use faer::{Col, Mat};
-use lazymatrix::{Centering, LazyMatrix, Normalization, Scaling};
+use lazymatrix::{Centering, LazyMatrix, MatrixShape, Normalization, Scaling, SparseRows};
 
 fn build(tm: &TestMatrix) -> SparseColMat<usize, f64> {
     let triplets: Vec<Triplet<usize, usize, f64>> = tm
@@ -41,6 +42,70 @@ fn faer_backend_suite() {
     common::run_logical_columns_suite(build);
     common::run_backend_suite(build_dense, to_col, from_col);
     common::run_logical_columns_suite(build_dense);
+}
+
+#[test]
+fn faer_sparse_rows_suite() {
+    common::run_sparse_rows_suite(|tm| {
+        let triplets: Vec<_> = tm
+            .triplets
+            .iter()
+            .map(|&(i, j, value)| Triplet::new(i, j, value))
+            .collect();
+        SparseRowMat::try_new_from_triplets(tm.nrows, tm.ncols, &triplets).unwrap()
+    });
+}
+
+#[test]
+fn faer_sparse_rows_borrow_only_occupied_storage() {
+    let symbolic = SymbolicSparseRowMat::new_checked(
+        3,
+        4,
+        vec![0, 3, 5, 7],
+        Some(vec![2, 0, 1]),
+        vec![0, 2, 99, 99, 99, 1, 99],
+    );
+    let mut matrix = SparseRowMat::new(symbolic, vec![1.0_f32, 0.0, 99.0, 99.0, 99.0, -2.0, 99.0]);
+    let indices_ptr = matrix.col_idx().as_ptr();
+    let values_ptr = matrix.val().as_ptr();
+    let check = |rows: &dyn SparseRows<f32>| {
+        assert_eq!(rows.nrows(), 3);
+        assert_eq!(rows.ncols(), 4);
+        let (indices, values) = rows.sparse_row(0);
+        assert_eq!(indices, &[0, 2]);
+        assert_eq!(values, &[1.0, 0.0]);
+        assert_eq!(indices.as_ptr(), indices_ptr);
+        assert_eq!(values.as_ptr(), values_ptr);
+        assert_eq!(rows.sparse_row(1), (&[][..], &[][..]));
+        assert_eq!(rows.sparse_row(2), (&[1][..], &[-2.0][..]));
+    };
+    check(&matrix);
+    check(&matrix.as_ref());
+    check(&matrix.rb_mut());
+
+    let csc = build(&common::random_matrix(76, 5, 3, 0.5));
+    let transposed = csc.as_ref().transpose();
+    assert_eq!(MatrixShape::nrows(&transposed), 3);
+    assert_eq!(MatrixShape::ncols(&transposed), 5);
+    for i in 0..3 {
+        let (indices, values) = transposed.sparse_row(i);
+        let range = csc.col_range(i);
+        assert_eq!(indices, &csc.row_idx()[range.clone()]);
+        assert_eq!(indices.as_ptr(), csc.row_idx()[range.clone()].as_ptr());
+        assert_eq!(values.as_ptr(), csc.val()[range].as_ptr());
+    }
+}
+
+#[test]
+fn faer_sparse_rows_preserve_unsorted_entries() {
+    let symbolic =
+        SymbolicSparseRowMat::new_unsorted_checked(1, 3, vec![0, 3], None, vec![2, 0, 2]);
+    let matrix = SparseRowMat::new(symbolic, vec![1.0, 0.0, -2.0]);
+    let (columns, values) = matrix.sparse_row(0);
+    assert_eq!(columns, &[2, 0, 2]);
+    assert_eq!(values, &[1.0, 0.0, -2.0]);
+    assert_eq!(columns.as_ptr(), matrix.col_idx().as_ptr());
+    assert_eq!(values.as_ptr(), matrix.val().as_ptr());
 }
 
 #[test]

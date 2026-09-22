@@ -20,8 +20,8 @@ X̃ᵀu = S⁻¹(Xᵀu − c Σu)
 ```
 
 Centering and scaling are independently optional. The crate also provides
-borrowed logical column views and sparse column access for algorithms such as
-coordinate descent.
+borrowed logical column views and sparse column and row access for algorithms
+that work directly with stored entries.
 
 ## Install
 
@@ -141,6 +141,38 @@ Logical columns borrow sprs vector views for any supported index type.
 `SparseColumns` requires `usize` row indices so it can return slices without
 copying. A centered column dot takes O(nrows + nnz_column); `dot_with_sum`
 uses a caller-supplied vector sum to take O(nnz_column).
+
+`SparseRows` borrows raw column-index and value slices from CSR storage in O(1)
+time, including explicitly stored zeros. It supports faer's `SparseRowMat`,
+`SparseRowMatRef`, and `SparseRowMatMut` with `usize` indices, and
+nalgebra-sparse's `CsrMatrix`. These CSR types currently provide shape and raw
+row access; their operator and column-statistics implementations remain future
+work.
+
+For sprs, use the checked `SprsCsr` wrapper:
+
+```rust
+use lazymatrix::{SparseRows, SprsCsr};
+use sprs::CsMat;
+
+let x = CsMat::new(
+    (2, 3),
+    vec![0, 2, 3],
+    vec![0, 2, 1],
+    vec![1.0, 0.0, 2.0],
+);
+let csr = SprsCsr::try_new(x.view()).unwrap();
+let (columns, values) = csr.sparse_row(0);
+assert_eq!(columns, &[0, 2]);
+assert_eq!(values, &[1.0, 0.0]);
+```
+
+`SprsCsr::try_new` checks orientation without copying and returns a CSC input
+unchanged as `Err`. The wrapper forwards products and statistics, so it can
+also be passed to `LazyMatrix::new`. Row borrowing requires `usize` column
+indices; pointer indices may use any supported width. The returned slices
+describe the original matrix, before normalization. Normalized row views
+remain future work.
 
 Enable `parallel` alongside a backend to compute column statistics with Rayon.
 For sprs, CSC columns run independently in parallel; CSR statistics scan rows
