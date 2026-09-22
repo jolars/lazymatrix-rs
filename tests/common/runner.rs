@@ -136,6 +136,8 @@ pub fn run_backend_suite<M, V>(
     reusable_output_parity(&build, &to_v, &from_v);
     adjoint_identity(&build, &to_v, &from_v);
     from_parts_passthrough(&build, &to_v, &from_v);
+    explicit_scales_reject_zero(&build);
+    explicit_normalization_preserves_parameters(&build);
     new_matches_oracle(&build, &to_v, &from_v);
     column_stats_fixed(&build);
     column_stats_respect_sparse_storage(&build);
@@ -163,7 +165,7 @@ fn reusable_output_parity<M, V>(
     let centers = random_vec(102, tm.ncols);
     let scales: Vec<f64> = random_vec(103, tm.ncols)
         .iter()
-        .map(|x| x.abs() + 0.5)
+        .map(|x| (x.abs() + 0.5).copysign(*x))
         .collect();
     let v = to_v(&random_vec(104, tm.ncols));
     let u = to_v(&random_vec(105, tm.nrows));
@@ -405,7 +407,7 @@ where
 {
     let tm = column_view_matrix();
     let centers = vec![0.5, -1.0, 2.0, 3.0];
-    let scales = vec![2.0, 4.0, 0.5, 1.5];
+    let scales = vec![2.0, -4.0, 0.5, -1.5];
     let vector = vec![1.5, -2.0, 0.25, 3.0];
     let weights = vec![0.5, 2.0, 1.25, 3.0];
 
@@ -569,7 +571,7 @@ where
 {
     let tm = column_view_matrix();
     let centers = vec![0.5, -1.0, 2.0, 3.0];
-    let scales = vec![2.0, 4.0, 0.5, 1.5];
+    let scales = vec![2.0, -4.0, 0.5, -1.5];
 
     for &use_center in &[false, true] {
         for &use_scale in &[false, true] {
@@ -606,7 +608,7 @@ where
 {
     let tm = column_view_matrix();
     let centers = vec![0.5, -1.0, 2.0, 3.0];
-    let scales = vec![2.0, 4.0, 0.5, 1.5];
+    let scales = vec![2.0, -4.0, 0.5, -1.5];
     let vector = vec![1.5, -2.0, 0.25, 3.0];
     let weights = vec![0.5, 2.0, 1.25, 3.0];
     let vector_sum = vector.iter().sum();
@@ -867,6 +869,8 @@ where
     assert_eq!(matrix.col_l2().unwrap(), vec![0.0, 0.0]);
 
     let lazy = LazyMatrix::new(matrix, Normalization::new(Centering::Mean, Scaling::Sd)).unwrap();
+    let (data, centers, scales) = lazy.into_parts();
+    let lazy = LazyMatrix::from_parts(data, centers, scales);
     assert!(lazy.centers().unwrap().iter().all(|value| value.is_nan()));
     assert!(lazy.scales().unwrap().iter().all(|value| value.is_nan()));
 
@@ -961,7 +965,7 @@ fn oracle_parity<M, V>(
     let centers = random_vec(2, tm.ncols);
     let scales: Vec<f64> = random_vec(3, tm.ncols)
         .iter()
-        .map(|x| x.abs() + 0.5)
+        .map(|x| (x.abs() + 0.5).copysign(*x))
         .collect();
     let v = to_v(&random_vec(4, tm.ncols));
     let u = to_v(&random_vec(5, tm.nrows));
@@ -1002,7 +1006,7 @@ fn adjoint_identity<M, V>(
     let centers = random_vec(7, tm.ncols);
     let scales: Vec<f64> = random_vec(8, tm.ncols)
         .iter()
-        .map(|x| x.abs() + 0.3)
+        .map(|x| (x.abs() + 0.3).copysign(*x))
         .collect();
     let lazy = LazyMatrix::from_parts(build(&tm), Some(centers), Some(scales));
     let v = to_v(&random_vec(9, tm.ncols));
@@ -1040,6 +1044,84 @@ fn from_parts_passthrough<M, V>(
     let lazy = LazyMatrix::from_parts(build(&tm), None, None);
     assert_eq!(from_v(&lazy.matvec(&v).unwrap()), bare_y);
     assert_eq!(from_v(&lazy.mat_transpose_vec(&u).unwrap()), bare_t);
+}
+
+fn explicit_scales_reject_zero<M: MatrixShape>(build: &impl Fn(&TestMatrix) -> M) {
+    let tm = random_matrix(23, 2, 3, 0.5);
+    for zero in [0.0, -0.0] {
+        for column in 0..tm.ncols {
+            for scales_only in [false, true] {
+                let mut scales = vec![2.0; tm.ncols];
+                scales[column] = zero;
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if scales_only {
+                        LazyMatrix::with_scales(build(&tm), scales)
+                    } else {
+                        LazyMatrix::from_parts(build(&tm), Some(vec![0.0; tm.ncols]), Some(scales))
+                    }
+                }));
+                let panic = result.err().expect("explicit zero scales must panic");
+                let message = panic
+                    .downcast_ref::<String>()
+                    .expect("panic must report the column");
+                assert_eq!(
+                    message,
+                    &format!("scale at column {column} must be nonzero")
+                );
+            }
+        }
+    }
+}
+
+fn explicit_normalization_preserves_parameters<M: MatrixShape>(build: &impl Fn(&TestMatrix) -> M) {
+    let centers = vec![
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -0.0,
+        0.0,
+        -2.0,
+        2.0,
+    ];
+    let scales = vec![
+        f64::NAN,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        -2.0,
+        2.0,
+        f64::from_bits(1),
+        -f64::from_bits(1),
+    ];
+    let tm = random_matrix(24, 2, scales.len(), 0.5);
+    let bits = |values: &[f64]| {
+        values
+            .iter()
+            .map(|value| value.to_bits())
+            .collect::<Vec<_>>()
+    };
+
+    let lazy = LazyMatrix::from_parts(build(&tm), Some(centers.clone()), Some(scales.clone()));
+    assert_eq!(bits(lazy.centers().unwrap()), bits(&centers));
+    assert_eq!(bits(lazy.scales().unwrap()), bits(&scales));
+
+    let centered = LazyMatrix::with_centers(build(&tm), centers.clone());
+    assert_eq!(bits(centered.centers().unwrap()), bits(&centers));
+    assert!(centered.scales().is_none());
+
+    let scaled = LazyMatrix::with_scales(build(&tm), scales.clone());
+    assert_eq!(bits(scaled.scales().unwrap()), bits(&scales));
+    assert!(scaled.centers().is_none());
+
+    let (data, centers, scales) = lazy.into_parts();
+    let restored = LazyMatrix::from_parts(data, centers.clone(), scales.clone());
+    assert_eq!(
+        bits(restored.centers().unwrap()),
+        bits(centers.as_ref().unwrap())
+    );
+    assert_eq!(
+        bits(restored.scales().unwrap()),
+        bits(scales.as_ref().unwrap())
+    );
 }
 
 /// `new()` with every strategy: read back the computed centers/scales and

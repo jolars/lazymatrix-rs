@@ -139,6 +139,12 @@
 //! successful product. Borrowed views and explicit normalization parameters do
 //! not require I/O and retain their infallible APIs.
 //!
+//! [`LazyMatrix::from_parts`] and [`LazyMatrix::with_scales`] panic on explicit
+//! zero scales, including negative zero. Explicit parameters are otherwise
+//! preserved unchanged, including negative scales and nonfinite centers or
+//! scales. Computed normalization through [`LazyMatrix::new`] replaces exact
+//! zero scales with one while preserving nonfinite statistics.
+//!
 //! With `zarrs`, `ZarrMatrix` wraps an opened synchronous array without reading
 //! its chunks. Each product scans chunks serially, and normalization shares work
 //! through [`ColumnStats::normalization_stats`] to need at most two scans. Working

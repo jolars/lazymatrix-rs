@@ -74,6 +74,8 @@ combined `normalization_stats` hook through references and wrappers so storage
 backends retain their shared scans. `NormalizationStats<F>` is the pair of
 optional center and raw-scale vectors; only computed `LazyMatrix` construction
 replaces exact zero scales with one.
+Explicit construction panics on zero scales, including negative zero, and
+otherwise preserves parameters, including negative scales and nonfinite values.
 
 The zarrs 0.22 backend supports synchronous two-dimensional floating-point arrays
 and Rust 1.87. Read chunks serially, preserve configured fill values, and exclude

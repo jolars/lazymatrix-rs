@@ -42,13 +42,14 @@ state and solver-specific update logic belong in consuming crates.
     untouched. Such degenerate columns are left unscaled.
   - Document and test the behavior for every backend.
 
-- [ ] Validate explicit normalization parameters.
-  - Decide whether scales must be finite and strictly positive or merely
-    finite and nonzero.
-  - Ensure `from_parts` and `with_scales` cannot silently construct an operator
-    that divides by zero.
-  - Consider a fallible constructor if validation errors should not panic.
-  - Ensure the zero-scale guard treats nonfinite values deliberately.
+- [x] Validate explicit normalization parameters.
+  - Reject exact zero scales, including negative zero, in `from_parts` and
+    `with_scales`. Panic with the column index, as for invalid dimensions.
+  - Preserve all other supplied values, including negative scales, tiny nonzero
+    scales, and nonfinite centers or scales. Reconstruction from `into_parts`
+    preserves parameters even when computed statistics are nonfinite.
+  - Keep zero-to-one replacement exclusive to computed normalization.
+  - Defer a fallible constructor until a consumer needs recoverable validation.
 
 ## Sparse access capabilities
 

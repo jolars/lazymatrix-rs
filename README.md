@@ -202,6 +202,12 @@ as a `NormalizationStats<F>` pair. Its default dispatches to individual
 statistics. Storage backends can override it to share scans; `LazyMatrix::new`
 then replaces exact zero scales with one, preserving nonfinite values.
 
+`LazyMatrix::from_parts` and `LazyMatrix::with_scales` reject explicit zero scales
+with a panic that reports the column index. Both positive and negative zero are
+rejected. Explicit parameters are otherwise preserved unchanged, including
+negative scales, tiny nonzero scales, and nonfinite centers or scales. These
+constructors do not guarantee finite arithmetic results.
+
 ## Out-of-core matrices
 
 A borrowed ndarray view can refer to a memory-mapped file. The `ndarray_mmap`

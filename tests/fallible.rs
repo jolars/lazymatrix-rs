@@ -106,7 +106,7 @@ impl ColumnStats<f64> for Source {
         if self.fail.get() {
             return Err(ReadError);
         }
-        Ok((Some(vec![1.0, 2.0]), Some(vec![0.0, f64::INFINITY])))
+        Ok((Some(vec![1.0, 2.0]), Some(vec![-0.0, f64::INFINITY])))
     }
 }
 

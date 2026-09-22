@@ -13,7 +13,8 @@ use crate::traits::{
 /// [crate-level documentation](crate) for the math.
 ///
 /// `centers` and `scales` are each `None` when that axis of normalization is
-/// inactive. When present, each has length `ncols`.
+/// inactive. When present, each has length `ncols`, and no scale equals zero.
+/// Negative scales and nonfinite normalization parameters are allowed.
 #[derive(Clone, Debug)]
 pub struct LazyMatrix<M, F = f64> {
     data: M,
@@ -27,9 +28,14 @@ where
 {
     /// Construct from an explicit center and/or scale vector.
     ///
+    /// Parameters are preserved unchanged, including negative scales and
+    /// nonfinite values. Unlike [`Self::new`], this constructor rejects exact
+    /// zero scales rather than replacing them with one.
+    ///
     /// # Panics
     /// Panics if a provided `centers`/`scales` vector does not have length
-    /// `ncols`.
+    /// `ncols`, or if a scale is `+0.0` or `-0.0`. The zero-scale panic reports
+    /// the zero-based column index.
     pub fn from_parts(data: M, centers: Option<Vec<F>>, scales: Option<Vec<F>>) -> Self {
         let ncols = data.ncols();
         if let Some(c) = &centers {
@@ -37,6 +43,12 @@ where
         }
         if let Some(s) = &scales {
             assert_eq!(s.len(), ncols, "scales length must equal ncols");
+            for (column, &scale) in s.iter().enumerate() {
+                assert!(
+                    scale != F::zero(),
+                    "scale at column {column} must be nonzero"
+                );
+            }
         }
         Self {
             data,
@@ -47,6 +59,8 @@ where
 
     /// Wrap a matrix with column centering only.
     ///
+    /// Centers are preserved unchanged, including nonfinite values.
+    ///
     /// # Panics
     /// Panics if `centers.len() != ncols`.
     pub fn with_centers(data: M, centers: Vec<F>) -> Self {
@@ -55,8 +69,12 @@ where
 
     /// Wrap a matrix with column scaling only.
     ///
+    /// Scales are preserved unchanged, including negative and nonfinite values.
+    /// Exact zero scales are rejected, as in [`Self::from_parts`].
+    ///
     /// # Panics
-    /// Panics if `scales.len() != ncols`.
+    /// Panics if `scales.len() != ncols`, or if a scale is `+0.0` or `-0.0`.
+    /// The zero-scale panic reports the zero-based column index.
     pub fn with_scales(data: M, scales: Vec<F>) -> Self {
         Self::from_parts(data, None, Some(scales))
     }
