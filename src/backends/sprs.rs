@@ -2,6 +2,7 @@
 
 mod csc;
 mod csr;
+mod gram;
 mod stats;
 
 pub use csc::SprsCsc;

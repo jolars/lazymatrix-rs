@@ -108,6 +108,37 @@ products accept immutable vector views directly. Borrowed column access preserve
 the original strides and takes O(1) time; dense logical-column operations take
 O(nrows) time.
 
+`WeightedGramInto` computes `Aᵀ diag(weights) A` into a reusable dense matrix:
+
+```rust
+use lazymatrix::{LazyMatrix, WeightedGramInto};
+use ndarray::{Array2, array};
+
+let x = array![[1.0, 0.0], [2.0, 3.0], [0.0, 4.0]];
+let lazy = LazyMatrix::with_centers(x.view(), vec![1.0, 2.0]);
+let mut gram = Array2::zeros((2, 2));
+lazy.weighted_gram_into(&array![1.0, 0.5, 2.0], &mut gram).unwrap();
+```
+
+Inputs can be dense ndarray arrays or views, faer or nalgebra CSC matrices,
+or checked `SprsCsc` matrices or views with `usize` row indices. Output can be
+an owned or mutable-view ndarray, faer, or nalgebra dense matrix, independent
+of the input backend. Weights may be signed, zero, or nonfinite. The operation
+overwrites both triangles and supports strided weights and outputs.
+
+Kernels center values before multiplying, preserving small variations around
+large offsets. Dense kernels use bounded panels. CSC kernels choose sparse pair
+accumulation or bounded panels according to density; the sparse pair path uses
+O(nrows + ncols) scratch with centering, in addition to the O(ncols²) output.
+Neither creates a full normalized or weighted design matrix. Unsorted or
+duplicate sparse indices and
+nonfinite arithmetic use a slower direct fallback with at most two working
+columns. Scratch is allocated internally on each call. See the trait documentation
+for complexity and error contracts, and `examples/weighted_gram.rs` for a dense
+and sparse demonstration.
+The [weighted Gram benchmarks](benches/weighted_gram.md) compare both kernels
+with repeated operator products and dense matrix multiplication, including BLAS.
+
 The sprs backend supports owned CSC and CSR matrices and borrowed views. Use
 `Vec` for allocating products, or enable an ndarray feature to use that
 release's `Array1`. Reusable-output products accept any supported dense vector

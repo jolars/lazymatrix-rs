@@ -110,6 +110,10 @@ required-features = ["faer_all"]
 name = "slope_primitives"
 required-features = ["faer_all"]
 
+[[example]]
+name = "weighted_gram"
+required-features = ["ndarray_all", "sprs_all"]
+
 [[bench]]
 name = "column_sds"
 harness = false
@@ -118,3 +122,8 @@ harness = false
 name = "sprs_backend"
 harness = false
 required-features = ["sprs_all"]
+
+[[bench]]
+name = "weighted_gram"
+harness = false
+required-features = ["ndarray_all", "sprs_all"]

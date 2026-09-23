@@ -25,6 +25,7 @@ fn build(tm: &TestMatrix) -> CsMat<f64> {
 
 #[test]
 fn sprs_backend_suite() {
+    common::run_gram_suite(|tm| SprsCsc::try_new(build(tm)).unwrap());
     common::run_backend_suite(build, |v| v.to_vec(), Clone::clone);
     common::run_backend_suite(|tm| build(tm).to_csr(), |v| v.to_vec(), Clone::clone);
     common::run_backend_suite(
@@ -47,6 +48,30 @@ fn sprs_backend_suite() {
         }
         SprsCsc::try_new(triplets.to_csc::<u64>()).unwrap()
     });
+}
+
+#[test]
+fn sprs_gram_accepts_sliced_columns_and_explicit_zeros() {
+    use lazymatrix::WeightedGramInto;
+    let matrix = CsMat::new_csc(
+        (3, 3),
+        vec![0, 1, 3, 4],
+        vec![0, 0, 2, 1],
+        vec![99.0, 0.0, 2.0, -1.0],
+    );
+    let lazy = LazyMatrix::from_parts(
+        SprsCsc::try_new(matrix.slice_outer(1..3)).unwrap(),
+        Some(vec![1.0, 2.0]),
+        None,
+    );
+    let mut out = common::GramOutput(vec![vec![f64::NAN; 2]; 2]);
+    lazy.weighted_gram_into(&[1.0, 2.0, 3.0], &mut out).unwrap();
+    let dense = vec![vec![0.0, 0.0], vec![0.0, -1.0], vec![2.0, 0.0]];
+    common::assert_gram(
+        &out,
+        &common::materialize(&dense, lazy.centers(), None),
+        &[1.0, 2.0, 3.0],
+    );
 }
 
 #[test]

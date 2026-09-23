@@ -37,11 +37,48 @@ fn build_dense(tm: &TestMatrix) -> Mat<f64> {
 
 #[test]
 fn faer_backend_suite() {
+    common::run_gram_suite(build);
     common::run_backend_suite(build, to_col, from_col);
     common::run_sparse_columns_suite(build);
     common::run_logical_columns_suite(build);
     common::run_backend_suite(build_dense, to_col, from_col);
     common::run_logical_columns_suite(build_dense);
+}
+
+#[test]
+fn faer_gram_uses_occupied_columns_and_combines_duplicates() {
+    use lazymatrix::{SparseColumns, WeightedGramInto};
+    let symbolic = faer::sparse::SymbolicSparseColMat::new_unsorted_checked(
+        3,
+        2,
+        vec![0, 4, 6],
+        Some(vec![3, 1]),
+        vec![2, 0, 2, 99, 1, 99],
+    );
+    let matrix = SparseColMat::new(symbolic, vec![1.0, 0.0, -2.0, 99.0, 4.0, 99.0]);
+    assert_eq!(
+        matrix.sparse_column(0),
+        (&[2, 0, 2][..], &[1.0, 0.0, -2.0][..])
+    );
+    let lazy = LazyMatrix::from_parts(&matrix, Some(vec![1.0, 2.0]), Some(vec![2.0, -1.0]));
+    let mut out = Mat::full(2, 2, f64::NAN);
+    lazy.weighted_gram_into(&[0.5, 2.0, -1.0], &mut out.as_mut())
+        .unwrap();
+    let actual = common::GramOutput(
+        (0..2)
+            .map(|i| (0..2).map(|j| out[(i, j)]).collect())
+            .collect(),
+    );
+    let dense = vec![vec![0.0, 0.0], vec![0.0, 4.0], vec![-1.0, 0.0]];
+    common::assert_gram(
+        &actual,
+        &common::materialize(&dense, lazy.centers(), lazy.scales()),
+        &[0.5, 2.0, -1.0],
+    );
+    let mut owned = Mat::zeros(2, 2);
+    lazy.weighted_gram_into(&[0.5, 2.0, -1.0], &mut owned)
+        .unwrap();
+    assert_eq!(owned, out);
 }
 
 #[test]

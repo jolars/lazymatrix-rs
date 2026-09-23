@@ -11,6 +11,9 @@
 //!   and by [`LazyMatrix`](crate::LazyMatrix) itself. Products return `Result`.
 //! * Solver-facing vector algebra ([`DotProduct`], [`L2Norm`],
 //!   [`ScaledAddAssign`], and [`ScaleAssign`]).
+//! * [`WeightedGramInto`] computes dense coefficient-space products into
+//!   [`MatrixWrite`] storage. [`WeightedGramKernel`] lets backends apply
+//!   normalization during accumulation to preserve small centered variations.
 //! * The five normalization-specific *vector* traits ([`ElemDivAssign`], [`DotSlice`],
 //!   [`SubScalarAssign`], [`SumEntries`], [`ScaledSubSlice`]) — the elementwise
 //!   primitives that fold the lazy normalization into a backend vector. They are
@@ -37,6 +40,7 @@ pub trait Scalar:
 }
 
 mod columns;
+mod gram;
 mod operator;
 mod rows;
 mod stats;
@@ -44,6 +48,7 @@ mod vectors;
 
 pub use crate::normalization::{Centering, Normalization, NormalizationStats, Scaling};
 pub use columns::{Columns, LogicalColumn, RawColumn, RawColumns, SparseColumns};
+pub use gram::{MatrixWrite, WeightedGramInto, WeightedGramKernel};
 pub use operator::{
     MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixErrorType, MatrixShape,
 };

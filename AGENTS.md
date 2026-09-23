@@ -11,6 +11,8 @@ re-exports. The main implementation is divided as follows:
 - `src/column.rs` contains logical and sparse borrowed column views.
 - `src/traits/operator.rs` defines matrix shape and allocating or
   reusable-output matrix-vector products.
+- `src/traits/gram.rs` defines writable dense output and weighted Gram
+  capabilities. `src/gram.rs` contains shared validation and sparse Gram kernels.
 - `src/traits/vectors.rs`, `stats.rs`, and `columns.rs` define vector algebra,
   sparse-aware statistics, and column capabilities.
 - `src/traits/rows.rs` defines the contiguous sparse-row borrowing capability.
@@ -76,6 +78,15 @@ optional center and raw-scale vectors; only computed `LazyMatrix` construction
 replaces exact zero scales with one.
 Explicit construction panics on zero scales, including negative zero, and
 otherwise preserves parameters, including negative scales and nonfinite values.
+
+Weighted Gram kernels receive normalization parameters through
+`WeightedGramKernel` and center values before accumulating products. Do not
+correct raw moments afterward: large offsets can erase centered variation.
+Dense ndarray kernels use bounded panels; CSC kernels choose bounded panels or
+borrowed column pairs with subtraction-free sums for implicit rows.
+Noncanonical columns and nonfinite
+arithmetic may use two working columns, but never a full dense design matrix.
+`MatrixWrite` keeps dense coefficient output independent of the input backend.
 
 The zarrs 0.22 backend supports synchronous two-dimensional floating-point arrays
 and Rust 1.87. Read chunks serially, preserve configured fill values, and exclude

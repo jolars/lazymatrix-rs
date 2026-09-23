@@ -23,6 +23,243 @@ pub struct TestMatrix {
     pub triplets: Vec<(usize, usize, f64)>, // stored nonzeros (row, col, val)
 }
 
+/// A backend-independent destination for coefficient-space products.
+pub struct GramOutput(pub Vec<Vec<f64>>);
+
+impl MatrixShape for GramOutput {
+    fn nrows(&self) -> usize {
+        self.0.len()
+    }
+    fn ncols(&self) -> usize {
+        self.0.first().map_or(0, Vec::len)
+    }
+}
+
+impl lazymatrix::MatrixWrite<f64> for GramOutput {
+    fn set(&mut self, row: usize, column: usize, value: f64) {
+        self.0[row][column] = value;
+    }
+}
+
+pub fn assert_gram(actual: &GramOutput, normalized: &[Vec<f64>], weights: &[f64]) {
+    for j in 0..actual.ncols() {
+        for k in 0..actual.ncols() {
+            let expected: f64 = normalized
+                .iter()
+                .zip(weights)
+                .map(|(row, w)| (row[j] * w) * row[k])
+                .sum();
+            let value = actual.0[j][k];
+            if expected.is_nan() {
+                assert!(value.is_nan(), "({j}, {k}): {value} should be NaN");
+            } else if expected.is_infinite() {
+                assert_eq!(value, expected);
+            } else {
+                approx::assert_relative_eq!(value, expected, epsilon = 1e-10, max_relative = 1e-10);
+            }
+            if !value.is_nan() {
+                assert_eq!(value, actual.0[k][j]);
+            }
+        }
+    }
+}
+
+pub fn run_gram_suite<M>(build: impl Fn(&TestMatrix) -> M)
+where
+    M: lazymatrix::WeightedGramInto<f64> + lazymatrix::WeightedGramKernel<f64> + ColumnStats<f64>,
+{
+    use lazymatrix::WeightedGramInto;
+
+    for (n, p, density) in [
+        (19, 5, 0.2),
+        (7, 3, 1.0),
+        (0, 3, 0.0),
+        (5, 0, 0.0),
+        (5, 3, 0.0),
+    ] {
+        let tm = random_matrix(789, n, p, density);
+        let matrix = build(&tm);
+        let weights: Vec<_> = (0..n).map(|i| (i % 5) as f64 - 2.0).collect();
+        let mut out = GramOutput(vec![vec![f64::NAN; p]; p]);
+        matrix.weighted_gram_into(&weights, &mut out).unwrap();
+        assert_gram(&out, &tm.dense, &weights);
+        for center in [Centering::None, Centering::Mean, Centering::Min] {
+            for scale in [
+                Scaling::None,
+                Scaling::Sd,
+                Scaling::L1,
+                Scaling::L2,
+                Scaling::MaxAbs,
+                Scaling::Range,
+            ] {
+                let lazy = LazyMatrix::new(&matrix, Normalization::new(center, scale)).unwrap();
+                lazy.weighted_gram_into(&weights, &mut out).unwrap();
+                assert_gram(
+                    &out,
+                    &materialize(&tm.dense, lazy.centers(), lazy.scales()),
+                    &weights,
+                );
+            }
+        }
+        let lazy = LazyMatrix::from_parts(&matrix, Some(vec![1.25; p]), Some(vec![-2.0; p]));
+        lazy.weighted_gram_into(&weights, &mut out).unwrap();
+        assert_gram(
+            &out,
+            &materialize(&tm.dense, lazy.centers(), lazy.scales()),
+            &weights,
+        );
+        for scale in [f64::INFINITY, f64::NEG_INFINITY, f64::NAN] {
+            let nonfinite = LazyMatrix::from_parts(&matrix, None, Some(vec![scale; p]));
+            nonfinite.weighted_gram_into(&weights, &mut out).unwrap();
+            assert_gram(
+                &out,
+                &materialize(&tm.dense, None, nonfinite.scales()),
+                &weights,
+            );
+        }
+        let bad_weights = vec![1.0; n + 1];
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                lazy.weighted_gram_into(&bad_weights, &mut out).unwrap();
+            }))
+            .is_err()
+        );
+        let mut wrong_out = GramOutput(vec![vec![42.0; p + 1]; p + 1]);
+        assert!(
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                lazy.weighted_gram_into(&weights, &mut wrong_out).unwrap();
+            }))
+            .is_err()
+        );
+        assert!(wrong_out.0.iter().flatten().all(|&v| v == 42.0));
+        for (c, s) in [
+            (Some(vec![0.0; p + 1]), None),
+            (None, Some(vec![1.0; p + 1])),
+            (None, Some(vec![-0.0; p])),
+        ] {
+            if p == 0 && s.as_ref().is_some_and(Vec::is_empty) {
+                continue;
+            }
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    matrix
+                        .weighted_gram_normalized_into(
+                            &weights,
+                            c.as_deref(),
+                            s.as_deref(),
+                            &mut out,
+                        )
+                        .unwrap();
+                }))
+                .is_err()
+            );
+        }
+    }
+
+    let tm = random_matrix(518, 300, 37, 0.1);
+    let tiled = LazyMatrix::from_parts(build(&tm), Some(vec![0.5; 37]), Some(vec![-2.0; 37]));
+    let weights = random_vec(519, 300);
+    let mut out = GramOutput(vec![vec![f64::NAN; 37]; 37]);
+    tiled.weighted_gram_into(&weights, &mut out).unwrap();
+    assert_gram(
+        &out,
+        &materialize(&tm.dense, tiled.centers(), tiled.scales()),
+        &weights,
+    );
+    let mut nonfinite_weights = weights;
+    nonfinite_weights[0] = f64::NAN;
+    tiled
+        .weighted_gram_into(&nonfinite_weights, &mut out)
+        .unwrap();
+    assert!(out.0.iter().flatten().all(|x| x.is_nan()));
+
+    let dense: Vec<Vec<_>> = (0..35)
+        .map(|i| {
+            (0..17)
+                .map(|j| 1e12 + (i % 5) as f64 - (j % 3) as f64)
+                .collect()
+        })
+        .collect();
+    let triplets = dense
+        .iter()
+        .enumerate()
+        .flat_map(|(i, row)| row.iter().enumerate().map(move |(j, &v)| (i, j, v)))
+        .collect();
+    let tm = TestMatrix {
+        nrows: 35,
+        ncols: 17,
+        dense,
+        triplets,
+    };
+    let tiled = LazyMatrix::with_centers(build(&tm), vec![1e12; 17]);
+    let mut out = GramOutput(vec![vec![f64::NAN; 17]; 17]);
+    tiled.weighted_gram_into(&[1.0; 35], &mut out).unwrap();
+    assert_gram(
+        &out,
+        &materialize(&tm.dense, tiled.centers(), None),
+        &[1.0; 35],
+    );
+
+    let cases = [
+        (vec![vec![1e12, -1e12]; 4], vec![1e12, -1e12], vec![1.0; 4]),
+        (
+            vec![
+                vec![1e12 - 2.0, 1e12 + 1.0],
+                vec![1e12 - 1.0, 1e12 - 2.0],
+                vec![1e12 + 1.0, 1e12 + 2.0],
+                vec![1e12 + 2.0, 1e12 - 1.0],
+            ],
+            vec![1e12; 2],
+            vec![1.0; 4],
+        ),
+        (
+            vec![vec![1e12, 1e12], vec![0.0, 0.0]],
+            vec![1e12; 2],
+            vec![1e16, 1.0],
+        ),
+        (
+            vec![vec![0.0, 2.0], vec![3.0, 0.0]],
+            vec![0.0; 2],
+            vec![f64::INFINITY, 1.0],
+        ),
+        (
+            vec![vec![f64::INFINITY, 0.0], vec![0.0, 1.0]],
+            vec![0.0; 2],
+            vec![0.0, 1.0],
+        ),
+        (
+            vec![vec![0.0, 2.0], vec![3.0, 0.0]],
+            vec![f64::NAN, f64::INFINITY],
+            vec![1.0; 2],
+        ),
+    ];
+    for (dense, centers, weights) in cases {
+        let triplets = dense
+            .iter()
+            .enumerate()
+            .flat_map(|(i, row)| {
+                row.iter()
+                    .enumerate()
+                    .filter_map(move |(j, &v)| (v != 0.0).then_some((i, j, v)))
+            })
+            .collect();
+        let tm = TestMatrix {
+            nrows: dense.len(),
+            ncols: 2,
+            dense,
+            triplets,
+        };
+        let lazy = LazyMatrix::from_parts(build(&tm), Some(centers), None);
+        let mut out = GramOutput(vec![vec![f64::NAN; 2]; 2]);
+        lazy.weighted_gram_into(&weights, &mut out).unwrap();
+        assert_gram(
+            &out,
+            &materialize(&tm.dense, lazy.centers(), lazy.scales()),
+            &weights,
+        );
+    }
+}
+
 /// Generate a reproducible sparse matrix with the given nonzero `density`.
 pub fn random_matrix(seed: u64, nrows: usize, ncols: usize, density: f64) -> TestMatrix {
     let mut rng = ChaCha8Rng::seed_from_u64(seed);

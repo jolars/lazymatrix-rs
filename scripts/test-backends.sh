@@ -61,6 +61,10 @@ check_msrv() {
             cargo check --all-targets --locked --no-default-features --features "$feature,parallel"
         fi
     done
+    # The Gram example and benchmark require both dense and sparse adapters.
+    for feature in "${ndarray_versions[@]}"; do
+        cargo check --all-targets --locked --no-default-features --features "$feature,sprs_v0_11"
+    done
 }
 
 case "${1:-all}" in

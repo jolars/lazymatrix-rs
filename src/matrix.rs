@@ -313,3 +313,26 @@ where
 impl<M: crate::MatrixErrorType, F> crate::MatrixErrorType for LazyMatrix<M, F> {
     type Error = M::Error;
 }
+
+impl<M, F> crate::WeightedGramInto<F> for LazyMatrix<M, F>
+where
+    F: Scalar,
+    M: crate::WeightedGramKernel<F>,
+{
+    fn weighted_gram_into<W, O>(&self, weights: &W, out: &mut O) -> Result<(), Self::Error>
+    where
+        W: crate::VectorView<F> + ?Sized,
+        O: crate::MatrixWrite<F> + ?Sized,
+    {
+        crate::gram::validate(
+            self.nrows(),
+            self.ncols(),
+            weights,
+            self.centers(),
+            self.scales(),
+            out,
+        );
+        self.data
+            .weighted_gram_normalized_into(weights, self.centers(), self.scales(), out)
+    }
+}

@@ -28,9 +28,52 @@ fn build_fortran(tm: &TestMatrix) -> Array2<f64> {
 #[test]
 fn ndarray_backend_suite() {
     for build in [build, build_fortran] {
+        common::run_gram_suite(build);
         common::run_backend_suite(build, |v| Array1::from_vec(v.to_vec()), |v| v.to_vec());
         common::run_logical_columns_suite(build);
     }
+}
+
+#[test]
+fn ndarray_gram_strides_tiles_and_f32() {
+    use lazymatrix::WeightedGramInto;
+    let storage = Array2::from_shape_fn((600, 74), |(i, j)| ((i + j * 3) % 13) as f64 + 1e9);
+    let matrix = storage.slice(s![..;-2, ..;2]);
+    let weight_storage = Array1::from_shape_fn(600, |i| (i % 7) as f64 - 3.0);
+    let weights = weight_storage.slice(s![..;-2]);
+    let lazy = LazyMatrix::from_parts(matrix, Some(vec![1e9; 37]), Some(vec![-2.0; 37]));
+    let mut output = Array2::from_elem((74, 74), -99.0);
+    lazy.weighted_gram_into(&weights, &mut output.slice_mut(s![..;-2, ..;2]))
+        .unwrap();
+    let actual = common::GramOutput(
+        output
+            .slice(s![..;-2, ..;2])
+            .rows()
+            .into_iter()
+            .map(|r| r.to_vec())
+            .collect(),
+    );
+    let dense: Vec<_> = matrix.rows().into_iter().map(|r| r.to_vec()).collect();
+    common::assert_gram(
+        &actual,
+        &materialize(&dense, lazy.centers(), lazy.scales()),
+        &weights.to_vec(),
+    );
+    assert!(output.slice(s![..;2, ..]).iter().all(|&x| x == -99.0));
+    assert!(output.slice(s![.., 1..;2]).iter().all(|&x| x == -99.0));
+
+    let matrix = array![[1.0_f32, 0.0], [2.0, 3.0]];
+    let mut out = Array2::from_elem((2, 2).f(), f32::NAN);
+    matrix
+        .weighted_gram_into(&[2.0_f32, -1.0], &mut out)
+        .unwrap();
+    assert_eq!(out, array![[-2.0, -6.0], [-6.0, -9.0]]);
+    let broadcast = matrix.row(0);
+    let broadcast = broadcast.broadcast((3, 2)).unwrap();
+    broadcast
+        .weighted_gram_into(&[1.0_f32; 3], &mut out)
+        .unwrap();
+    assert_eq!(out, array![[3.0, 0.0], [0.0, 0.0]]);
 }
 
 fn check_matrix_view(matrix: ArrayView2<'_, f64>) {

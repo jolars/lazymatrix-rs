@@ -35,11 +35,34 @@ fn build_dense(tm: &TestMatrix) -> DMatrix<f64> {
 
 #[test]
 fn nalgebra_backend_suite() {
+    common::run_gram_suite(build);
     common::run_backend_suite(build, to_dvec, from_dvec);
     common::run_sparse_columns_suite(build);
     common::run_logical_columns_suite(build);
     common::run_backend_suite(build_dense, to_dvec, from_dvec);
     common::run_logical_columns_suite(build_dense);
+}
+
+#[test]
+fn nalgebra_gram_writes_owned_and_borrowed_f32_outputs() {
+    use lazymatrix::WeightedGramInto;
+    let matrix =
+        CscMatrix::try_from_csc_data(2, 2, vec![0, 2, 3], vec![0, 1, 1], vec![1.0_f32, 2.0, 3.0])
+            .unwrap();
+    let mut out = DMatrix::from_element(2, 2, f32::NAN);
+    matrix
+        .weighted_gram_into(&[2.0_f32, -1.0], &mut out)
+        .unwrap();
+    assert_eq!(
+        out,
+        DMatrix::from_row_slice(2, 2, &[-2.0, -6.0, -6.0, -9.0])
+    );
+    let mut storage = DMatrix::from_element(4, 4, -99.0);
+    matrix
+        .weighted_gram_into(&[2.0_f32, -1.0], &mut storage.view_mut((1, 1), (2, 2)))
+        .unwrap();
+    assert_eq!(storage.view((1, 1), (2, 2)), out);
+    assert_eq!(storage[(0, 0)], -99.0);
 }
 
 #[test]

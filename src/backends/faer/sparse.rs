@@ -46,9 +46,9 @@ impl<F> MatrixShape for SparseColMat<usize, F> {
 impl<F: Scalar> SparseColumns<F> for SparseColMat<usize, F> {
     fn sparse_column(&self, j: usize) -> (&[usize], &[F]) {
         assert!(j < self.ncols(), "column index out of bounds");
-        let start = self.col_ptr()[j];
-        let end = self.col_ptr()[j + 1];
-        (&self.row_idx()[start..end], &self.val()[start..end])
+        // A column can reserve more capacity than it actually stores.
+        let range = self.col_range(j);
+        (&self.row_idx()[range.clone()], &self.val()[range])
     }
 }
 

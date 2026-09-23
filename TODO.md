@@ -235,7 +235,7 @@ IRLS algorithm, regularization, and ndarray-linalg solves. Tall matrices with
 moderate numbers of predictors are the initial use case; the coefficient-space
 system still requires O(p^2) storage.
 
-- [ ] Add efficient weighted Gram-matrix products as the first priority.
+- [x] Add efficient weighted Gram-matrix products as the first priority.
   - Compute `A^T diag(weights) A` for the logical normalized matrix, with a
     fallible reusable-output capability and a dense coefficient-space result.
   - Keep the core trait independent of ndarray while allowing ndarray-glm to
@@ -248,6 +248,14 @@ system still requires O(p^2) storage.
   - Test against a dense oracle, including large offsets with small variation.
     Use numerically stable centering; subtracting large raw moments can erase
     the centered cross-product.
+  - Implemented for dense ndarray and faer, nalgebra, and checked sprs CSC
+    inputs, with backend-independent reusable output. See
+    `examples/weighted_gram.rs` and `benches/weighted_gram.md`.
+
+- [ ] Reduce centered CSC Gram overhead at very low densities.
+  - Benchmarks show that repeated operator products remain faster at 0.1% and
+    1% density. Preserve direct centering and IEEE behavior when optimizing the
+    sparse pair and bounded-panel kernels.
 
 - [ ] Demonstrate compatible weighted normalization in the consuming crate.
   - ndarray-glm uses weighted means and sample standard deviations, including an

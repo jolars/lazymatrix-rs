@@ -26,6 +26,72 @@ use lazymatrix::{Centering, LazyMatrix, MatTransposeVec, MatVec, Normalization, 
 
 type Products = (Vec<f64>, Vec<f64>);
 
+#[cfg(feature = "ndarray_all")]
+#[test]
+fn csc_backends_write_f32_grams_directly_into_ndarray() {
+    use lazymatrix::{WeightedGramInto, WeightedGramKernel};
+    let values = [[1.0_f32, 0.0], [2.0, 3.0]];
+    let weights = [2.0_f32, -1.0];
+    let dense = ndarray::Array2::from_shape_fn((2, 2), |(i, j)| values[i][j]);
+    let lazy = LazyMatrix::from_parts(dense.view(), Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
+    let mut expected = ndarray::Array2::zeros((2, 2));
+    lazy.weighted_gram_into(&weights, &mut expected).unwrap();
+    fn check<M: WeightedGramKernel<f32>>(
+        matrix: M,
+        weights: &[f32],
+        expected: &ndarray::Array2<f32>,
+    ) {
+        let lazy = LazyMatrix::from_parts(matrix, Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
+        let mut out = ndarray::Array2::from_elem((2, 2), f32::NAN);
+        lazy.weighted_gram_into(weights, &mut out.view_mut())
+            .unwrap();
+        for (&a, &b) in out.iter().zip(expected) {
+            approx::assert_abs_diff_eq!(a, b, epsilon = 1e-6);
+        }
+    }
+    #[cfg(feature = "faer_all")]
+    {
+        use faer::sparse::{SparseColMat, Triplet};
+        let matrix = SparseColMat::try_new_from_triplets(
+            2,
+            2,
+            &[
+                Triplet::new(0, 0, 1.0_f32),
+                Triplet::new(1, 0, 2.0),
+                Triplet::new(1, 1, 3.0),
+            ],
+        )
+        .unwrap();
+        check(&matrix, &weights, &expected);
+    }
+    #[cfg(feature = "nalgebra_all")]
+    {
+        let matrix = nalgebra_sparse::CscMatrix::try_from_csc_data(
+            2,
+            2,
+            vec![0, 2, 3],
+            vec![0, 1, 1],
+            vec![1.0_f32, 2.0, 3.0],
+        )
+        .unwrap();
+        check(&matrix, &weights, &expected);
+    }
+    #[cfg(feature = "sprs_all")]
+    {
+        let matrix = sprs::CsMat::new_csc(
+            (2, 2),
+            vec![0, 2, 3],
+            vec![0, 1, 1],
+            vec![1.0_f32, 2.0, 3.0],
+        );
+        check(
+            lazymatrix::SprsCsc::try_new(matrix.view()).unwrap(),
+            &weights,
+            &expected,
+        );
+    }
+}
+
 #[cfg(feature = "sprs_all")]
 fn sprs_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
     let mut triplets = sprs::TriMat::new((tm.nrows, tm.ncols));

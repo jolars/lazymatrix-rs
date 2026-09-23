@@ -131,6 +131,16 @@
 
 //! # Operational errors and out-of-core storage
 //!
+//! [`WeightedGramInto`] computes `Aᵀ diag(weights) A` for dense ndarray and
+//! `usize`-index CSC inputs from faer, nalgebra, and `SprsCsc` (when enabled).
+//! [`MatrixWrite`] destinations include owned and mutable-view dense matrices
+//! from ndarray, faer, and nalgebra. The output backend is independent of the
+//! input backend. Both triangles are overwritten, and weights can be signed,
+//! zero, or nonfinite. Kernels center values before accumulation, avoiding
+//! cancellation from subtracting large raw moments. Bounded dense panels or
+//! sparse working vectors avoid materializing the full logical design matrix.
+//! See `examples/weighted_gram.rs` for a borrowed-input demonstration.
+//!
 //! Products, [`ColumnStats`] methods, and [`LazyMatrix::new`] return `Result`.
 //! [`MatrixErrorType`] gives each backend one shared error type. In-memory
 //! backends use [`std::convert::Infallible`]; storage backends propagate read
@@ -299,6 +309,7 @@ compile_error!("`zarrs_all` is internal; enable `zarrs` or a `zarrs_v*` feature"
 
 mod backends;
 mod column;
+mod gram;
 mod matrix;
 mod normalization;
 pub mod traits;
@@ -313,6 +324,7 @@ pub use normalization::{Centering, Normalization, NormalizationStats, Scaling};
 pub use traits::{
     ColumnStats, Columns, DotProduct, DotSlice, ElemDivAssign, L2Norm, LogicalColumn,
     MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixErrorType, MatrixShape,
-    RawColumn, RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice, SparseColumns,
-    SparseRows, SubScalarAssign, SumEntries, VectorView, VectorViewMut,
+    MatrixWrite, RawColumn, RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice,
+    SparseColumns, SparseRows, SubScalarAssign, SumEntries, VectorView, VectorViewMut,
+    WeightedGramInto, WeightedGramKernel,
 };
