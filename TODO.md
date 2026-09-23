@@ -115,6 +115,8 @@ state and solver-specific update logic belong in consuming crates.
     backend-specific fast paths.
   - Measure allocation costs in an iterative consumer before designing a
     reusable normalization workspace.
+  - Use ndarray-glm fitting to evaluate repeated `S^-1 x` allocations and
+    support immutable coefficient views with caller-owned scratch storage.
   - Keep allocating convenience methods if they materially improve ergonomics.
 
 - [ ] Prototype fused scaled operator application.
@@ -204,6 +206,90 @@ state and solver-specific update logic belong in consuming crates.
     missing-value handling. Preserve the training schema for prediction,
     including an explicit policy for unseen levels.
   - Keep response handling and model fitting in consuming crates.
+
+## ndarray-glm integration
+
+These items come from comparing this crate with ndarray-glm 0.1.0 at
+[`0b727d8`](https://github.com/felix-clark/ndarray-glm/tree/0b727d8). The first
+target is borrowed ndarray and sparse CSC input while retaining ndarray-glm's
+IRLS algorithm, regularization, and ndarray-linalg solves. Tall matrices with
+moderate numbers of predictors are the initial use case; the coefficient-space
+system still requires O(p^2) storage.
+
+- [ ] Add efficient weighted Gram-matrix products as the first priority.
+  - Compute `A^T diag(weights) A` for the logical normalized matrix, with a
+    fallible reusable-output capability and a dense coefficient-space result.
+  - Keep the core trait independent of ndarray while allowing ndarray-glm to
+    receive an `Array2` for its existing solver.
+  - Start with dense ndarray and sparse CSC implementations. Preserve sparse
+    input storage and avoid materializing normalized or weighted design
+    matrices.
+  - Benchmark dense kernels against BLAS matrix-matrix multiplication and
+    compare both backends with assembly through repeated operator products.
+  - Test against a dense oracle, including large offsets with small variation.
+    Use numerically stable centering; subtracting large raw moments can erase
+    the centered cross-product.
+
+- [ ] Demonstrate compatible weighted normalization in the consuming crate.
+  - ndarray-glm uses weighted means and sample standard deviations, including an
+    effective-sample-size correction for frequency and variance weights.
+    Preserve this policy without changing `Scaling::Sd`'s population convention.
+  - Compute weighted means through a transpose product and centered weighted
+    sums of squares through existing logical-column operations, then pass the
+    adjusted centers and scales to `LazyMatrix::from_parts`.
+  - With no intercept, disable centering but retain scales computed from
+    deviations about the weighted mean.
+  - Preserve downstream handling of empty inputs, single observations, constant
+    columns, and nonfinite values. Keep sample corrections and validation policy
+    in ndarray-glm.
+  - Evaluate a shared weighted-statistics capability after the integration
+    establishes a need, especially for backends without borrowed columns.
+
+- [ ] Add an implicit intercept wrapper as a first lazy design-matrix component.
+  - Represent `A = [1, X_tilde]` by normalizing predictors before adding the
+    constant column, so centering cannot erase the intercept.
+  - Implement shape, error forwarding, forward and transpose products, and
+    reusable-output variants without allocating a column of ones.
+  - Construct weighted Gram blocks from the predictor Gram matrix,
+    `X_tilde^T weights`, and `sum(weights)`.
+  - Keep intercept fitting, penalty exclusions, and coefficient transformations
+    in the consuming crate. The wrapper should not require a formula frontend.
+
+- [ ] Prototype adoption through ndarray-glm's data and fitting interfaces.
+  - Its public `Dataset.x` is an owned `Array2`; supporting borrowed and sparse
+    storage requires a downstream API design spanning `Dataset`, `Model`, `Fit`,
+    and `Glm`.
+  - Replace design-matrix products and weighted transposes in initialization,
+    IRLS, and Fisher-information calculations with matrix capabilities.
+  - Retain coefficient, score, and covariance transformations downstream, using
+    the stored centers and scales.
+  - Keep solver experiments in examples or the downstream crate. Validate
+    lazymatrix capabilities through algebraic tests rather than solver
+    convergence tests.
+
+- [ ] Evaluate matrix capabilities needed for scalable diagnostics.
+  - ndarray-glm currently obtains leverage by constructing the full O(n^2) hat
+    matrix. Compute its diagonal directly downstream, evaluating batched
+    products or row quadratic forms as reusable matrix capabilities.
+  - Exact leave-one-out fitting already excludes observations through zero
+    frequency weights. Reuse borrowed raw storage and recompute normalization
+    for each refit; row-selection support is not a prerequisite.
+  - Evaluate column-selection views for fits that exclude individual predictors,
+    coordinated with the lazy design-matrix work above.
+  - Keep full hat matrices and other explicitly dense diagnostic outputs opt-in,
+    with their allocation costs documented downstream.
+
+- [ ] Validate and benchmark the first integration milestone.
+  - Cover dense ndarray and sparse CSC input, frequency and variance weights,
+    offsets, and models with and without an intercept.
+  - Compare Gaussian ridge coefficients and logistic IRLS systems with
+    ndarray-glm, then extend downstream coverage to fitted results and
+    diagnostics, including regularization and normalization edge cases.
+  - Measure fitting time, allocation costs, and peak memory against the existing
+    dense path. Include the reusable normalization workspace work under operator
+    performance.
+  - Establish the benefit before expanding to additional storage backends or
+    changing the solver for very large predictor counts.
 
 ## SLOPE rewrite support
 
