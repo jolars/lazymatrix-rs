@@ -54,8 +54,9 @@ feature to stay on a particular release line:
 For example, `cargo add lazymatrix --features nalgebra_v0_34` enables nalgebra
 0.34 and nalgebra-sparse 0.11. Set your direct backend dependency to the same
 release line. If Cargo enables multiple releases of one backend, lazymatrix
-implements traits only for the newest enabled release. The `*_all` features
-are internal markers, not entry points for selecting a backend.
+implements traits independently for every enabled release. Another dependency
+enabling a newer adapter does not remove support for your existing types. The
+`*_all` features are internal markers, not entry points for selecting a backend.
 
 The core and older backends support Rust 1.87. The `nalgebra` feature now selects
 nalgebra 0.35, which requires Rust 1.89. To retain the previous release and Rust

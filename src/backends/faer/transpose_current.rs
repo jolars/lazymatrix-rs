@@ -1,0 +1,20 @@
+use super::{faer, faer_traits};
+use crate::Scalar;
+use faer::sparse::SparseColMat;
+use faer::{Accum, Col, Par};
+
+pub(super) fn multiply<F: Scalar + faer_traits::ComplexField>(
+    matrix: &SparseColMat<usize, F>,
+    input: &Col<F>,
+    output: &mut Col<F>,
+    parallelism: Par,
+) {
+    faer::sparse::linalg::matmul::sparse_dense_matmul(
+        output.as_mat_mut(),
+        Accum::Replace,
+        matrix.as_ref().transpose(),
+        input.as_mat(),
+        F::one(),
+        parallelism,
+    );
+}

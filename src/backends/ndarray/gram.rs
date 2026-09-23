@@ -1,3 +1,5 @@
+use super::ndarray;
+
 use crate::gram::{normalize, validate};
 use crate::{MatrixWrite, Scalar, VectorView, WeightedGramInto, WeightedGramKernel};
 use ndarray::linalg::general_mat_mul;

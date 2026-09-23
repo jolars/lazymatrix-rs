@@ -12,6 +12,12 @@ test_features() {
     cargo test --locked --no-default-features "$@"
 }
 
+fixture_manifest=tests/feature_unification/Cargo.toml
+
+test_fixtures() {
+    cargo test --manifest-path "$fixture_manifest" --locked --no-default-features "$@"
+}
+
 test_version() {
     test_features --features "$1"
     test_features --features "$1,parallel"
@@ -27,6 +33,7 @@ test_core() {
         zarrs,ndarray_v0_15 zarrs,ndarray_v0_16 zarrs,ndarray_v0_17; do
         test_features --features "$features"
     done
+    test_features --features "$(IFS=,; echo "${versions[*]}")"
     test_features --all-features
 }
 
@@ -35,17 +42,29 @@ test_pairs() {
     local i j
     for ((i = 0; i < ${#versions[@]}; i++)); do
         for ((j = i + 1; j < ${#versions[@]}; j++)); do
-            test_features --features "${versions[i]},${versions[j]}"
+            local pair="${versions[i]},${versions[j]}"
+            test_version "$pair"
+            test_fixtures --features "$pair"
+            test_fixtures --features "$pair,parallel"
         done
     done
 }
 
-test_selection() {
+test_coexistence() {
     test_pairs "${faer_versions[@]}"
     test_pairs "${nalgebra_versions[@]}"
     test_pairs "${ndarray_versions[@]}"
-    test_pairs "${sprs_versions[@]}"
-    test_pairs "${zarrs_versions[@]}"
+    local feature family
+    for feature in "${faer_versions[@]:0:2}" "${nalgebra_versions[@]:0:3}" "${ndarray_versions[@]:0:2}"; do
+        family=${feature%%_v*}
+        test_version "$feature,$family"
+        test_fixtures --features "$feature,$family"
+        test_fixtures --features "$feature,$family,parallel"
+    done
+    local combined
+    combined=$(IFS=,; echo "${faer_versions[*]},${nalgebra_versions[*]},${ndarray_versions[*]}")
+    test_fixtures --features "$combined"
+    test_fixtures --all-features
 }
 
 check_msrv() {
@@ -61,6 +80,22 @@ check_msrv() {
             cargo check --all-targets --locked --no-default-features --features "$feature,parallel"
         fi
     done
+    local compatible=() fixture_compatible=()
+    for feature in "${versions[@]}"; do
+        if [[ $feature != nalgebra_v0_35 ]]; then
+            compatible+=("$feature")
+            if [[ $feature != sprs_* && $feature != zarrs_* ]]; then
+                fixture_compatible+=("$feature")
+            fi
+        fi
+    done
+    local combined fixtures
+    combined=$(IFS=,; echo "${compatible[*]}")
+    fixtures=$(IFS=,; echo "${fixture_compatible[*]}")
+    cargo check --all-targets --locked --no-default-features --features "$combined"
+    cargo check --all-targets --locked --no-default-features --features "$combined,parallel"
+    cargo check --manifest-path "$fixture_manifest" --all-targets --locked --no-default-features --features "$fixtures"
+    cargo check --manifest-path "$fixture_manifest" --all-targets --locked --no-default-features --features "$fixtures,parallel"
     # The Gram example and benchmark require both dense and sparse adapters.
     for feature in "${ndarray_versions[@]}"; do
         cargo check --all-targets --locked --no-default-features --features "$feature,sprs_v0_11"
@@ -73,14 +108,14 @@ all)
     for feature in "${versions[@]}"; do
         test_version "$feature"
     done
-    test_selection
+    test_coexistence
     ;;
 core) test_core ;;
 version) test_version "${2:?Specify a version feature.}" ;;
-selection) test_selection ;;
+coexistence | selection) test_coexistence ;;
 msrv) check_msrv ;;
 *)
-    echo "Usage: $0 [all|core|version FEATURE|selection|msrv]" >&2
+    echo "Usage: $0 [all|core|version FEATURE|coexistence|msrv]" >&2
     exit 1
     ;;
 esac

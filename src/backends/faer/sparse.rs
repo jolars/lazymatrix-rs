@@ -7,9 +7,9 @@
 //! Column statistics and borrowed column
 //! access use the CSC arrays directly, treating absent entries as zero.
 
+use super::{faer, faer_traits};
+
 use faer::sparse::SparseColMat;
-#[cfg(not(feature = "faer_v0_24"))]
-use faer::sparse::linalg::matmul::dense_sparse_matmul;
 use faer::sparse::linalg::matmul::sparse_dense_matmul;
 use faer::{Accum, Col, Par};
 
@@ -124,25 +124,7 @@ where
             out.nrows(),
             "mat_transpose_vec_into: output dimension mismatch"
         );
-        #[cfg(feature = "faer_v0_24")]
-        sparse_dense_matmul(
-            out.as_mat_mut(),
-            Accum::Replace,
-            self.as_ref().transpose(),
-            x.as_mat(),
-            F::one(),
-            parallelism(),
-        );
-        // Older faer releases only accept CSC input, so compute y^T = x^T X.
-        #[cfg(not(feature = "faer_v0_24"))]
-        dense_sparse_matmul(
-            out.as_mat_mut().transpose_mut(),
-            Accum::Replace,
-            x.as_mat().transpose(),
-            self.as_ref(),
-            F::one(),
-            parallelism(),
-        );
+        super::transpose::multiply(self, x, out, parallelism());
         Ok(())
     }
 }

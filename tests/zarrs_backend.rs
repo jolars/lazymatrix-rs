@@ -3,7 +3,7 @@
 
 #[path = "common/backend_aliases.rs"]
 mod backend_aliases;
-use backend_aliases::*;
+use backend_aliases::zarrs;
 #[path = "common/runner.rs"]
 mod common;
 
@@ -292,67 +292,83 @@ fn oversized_chunks_fail_before_reading_or_allocating_them() {
 }
 
 #[cfg(feature = "ndarray_all")]
-#[test]
-fn fused_normalization_matches_ndarray_statistics() {
-    let (matrix, _) = tracked(false);
-    let dense = ndarray::Array2::from_shape_fn((5, 3), |(i, j)| (3 * i + j + 1) as f64);
-    for center in [Centering::None, Centering::Mean, Centering::Min] {
-        for scale in [
-            Scaling::None,
-            Scaling::Sd,
-            Scaling::Range,
-            Scaling::L1,
-            Scaling::L2,
-            Scaling::MaxAbs,
-        ] {
-            let spec = Normalization::new(center, scale);
-            let chunked = LazyMatrix::new(&matrix, spec).unwrap();
-            let resident = LazyMatrix::new(&dense, spec).unwrap();
-            assert_eq!(chunked.centers().is_some(), resident.centers().is_some());
-            assert_eq!(chunked.scales().is_some(), resident.scales().is_some());
-            common::assert_close(
-                chunked.centers().unwrap_or(&[]),
-                resident.centers().unwrap_or(&[]),
-                1e-12,
-            );
-            common::assert_close(
-                chunked.scales().unwrap_or(&[]),
-                resident.scales().unwrap_or(&[]),
-                1e-12,
-            );
+macro_rules! ndarray_suite {
+    ($name:ident, $backend:ident) => {
+        mod $name {
+            use super::*;
+            use crate::backend_aliases::$backend as ndarray;
+            #[test]
+            fn fused_normalization_matches_ndarray_statistics() {
+                let (matrix, _) = tracked(false);
+                let dense = ndarray::Array2::from_shape_fn((5, 3), |(i, j)| (3 * i + j + 1) as f64);
+                for center in [Centering::None, Centering::Mean, Centering::Min] {
+                    for scale in [
+                        Scaling::None,
+                        Scaling::Sd,
+                        Scaling::Range,
+                        Scaling::L1,
+                        Scaling::L2,
+                        Scaling::MaxAbs,
+                    ] {
+                        let spec = Normalization::new(center, scale);
+                        let chunked = LazyMatrix::new(&matrix, spec).unwrap();
+                        let resident = LazyMatrix::new(&dense, spec).unwrap();
+                        assert_eq!(chunked.centers().is_some(), resident.centers().is_some());
+                        assert_eq!(chunked.scales().is_some(), resident.scales().is_some());
+                        common::assert_close(
+                            chunked.centers().unwrap_or(&[]),
+                            resident.centers().unwrap_or(&[]),
+                            1e-12,
+                        );
+                        common::assert_close(
+                            chunked.scales().unwrap_or(&[]),
+                            resident.scales().unwrap_or(&[]),
+                            1e-12,
+                        );
+                    }
+                }
+            }
+
+            #[test]
+            fn ndarray_vectors_and_strided_outputs_work_with_chunked_storage() {
+                use ndarray::{Array1, array, s};
+
+                let (matrix, _) = tracked(false);
+                let input_storage = array![1.0, -99.0, 2.0, -99.0, 4.0];
+                let input = input_storage.slice(s![..;2]);
+                let mut output = Array1::from_elem(10, -99.0);
+                matrix
+                    .matvec_into(&input, &mut output.slice_mut(s![..;-2]))
+                    .unwrap();
+                assert_eq!(
+                    output.slice(s![..;-2]),
+                    array![17.0, 38.0, 59.0, 80.0, 101.0]
+                );
+                assert!(output.slice(s![..;2]).iter().all(|&x| x == -99.0));
+
+                let lazy = LazyMatrix::from_parts(matrix, Some(vec![2.0, 3.0, 4.0]), Some(vec![1.0, 2.0, 4.0]));
+                lazy.matvec_into(&input.to_owned(), &mut output.slice_mut(s![..;-2]))
+                    .unwrap();
+                assert_eq!(output.slice(s![..;-2]), array![-3.0, 6.0, 15.0, 24.0, 33.0]);
+                assert!(output.slice(s![..;2]).iter().all(|&x| x == -99.0));
+
+                let row_storage = array![1.0, -99.0, 2.0, -99.0, 3.0, -99.0, 4.0, -99.0, 5.0];
+                let rows = row_storage.slice(s![..;2]);
+                let mut transpose = Array1::from_elem(6, -99.0);
+                lazy.mat_transpose_vec_into(&rows, &mut transpose.slice_mut(s![..;-2]))
+                    .unwrap();
+                assert_eq!(transpose.slice(s![..;-2]), array![105.0, 52.5, 26.25]);
+                assert!(transpose.slice(s![..;2]).iter().all(|&x| x == -99.0));
+            }
         }
-    }
+    };
 }
 
-#[cfg(feature = "ndarray_all")]
-#[test]
-fn ndarray_vectors_and_strided_outputs_work_with_chunked_storage() {
-    use ndarray::{Array1, array, s};
+#[cfg(feature = "ndarray_v0_15")]
+ndarray_suite!(ndarray_0_15, ndarray_0_15);
 
-    let (matrix, _) = tracked(false);
-    let input_storage = array![1.0, -99.0, 2.0, -99.0, 4.0];
-    let input = input_storage.slice(s![..;2]);
-    let mut output = Array1::from_elem(10, -99.0);
-    matrix
-        .matvec_into(&input, &mut output.slice_mut(s![..;-2]))
-        .unwrap();
-    assert_eq!(
-        output.slice(s![..;-2]),
-        array![17.0, 38.0, 59.0, 80.0, 101.0]
-    );
-    assert!(output.slice(s![..;2]).iter().all(|&x| x == -99.0));
+#[cfg(feature = "ndarray_v0_16")]
+ndarray_suite!(ndarray_0_16, ndarray_0_16);
 
-    let lazy = LazyMatrix::from_parts(matrix, Some(vec![2.0, 3.0, 4.0]), Some(vec![1.0, 2.0, 4.0]));
-    lazy.matvec_into(&input.to_owned(), &mut output.slice_mut(s![..;-2]))
-        .unwrap();
-    assert_eq!(output.slice(s![..;-2]), array![-3.0, 6.0, 15.0, 24.0, 33.0]);
-    assert!(output.slice(s![..;2]).iter().all(|&x| x == -99.0));
-
-    let row_storage = array![1.0, -99.0, 2.0, -99.0, 3.0, -99.0, 4.0, -99.0, 5.0];
-    let rows = row_storage.slice(s![..;2]);
-    let mut transpose = Array1::from_elem(6, -99.0);
-    lazy.mat_transpose_vec_into(&rows, &mut transpose.slice_mut(s![..;-2]))
-        .unwrap();
-    assert_eq!(transpose.slice(s![..;-2]), array![105.0, 52.5, 26.25]);
-    assert!(transpose.slice(s![..;2]).iter().all(|&x| x == -99.0));
-}
+#[cfg(feature = "ndarray_v0_17")]
+ndarray_suite!(ndarray_0_17, ndarray_0_17);

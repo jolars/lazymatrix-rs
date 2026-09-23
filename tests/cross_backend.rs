@@ -1,23 +1,13 @@
 #![cfg(any(
-    all(feature = "faer_all", feature = "nalgebra_all"),
-    all(feature = "faer_all", feature = "ndarray_all"),
-    all(feature = "nalgebra_all", feature = "ndarray_all"),
-    all(
-        feature = "sprs_all",
-        any(
-            feature = "faer_all",
-            feature = "nalgebra_all",
-            feature = "ndarray_all"
-        )
-    ),
+    feature = "faer_all",
+    feature = "nalgebra_all",
+    feature = "ndarray_all",
+    feature = "sprs_all"
 ))]
-//! Cross-backend agreement: the same logical matrix, normalized the same way,
-//! produces matching operator outputs under each pair of enabled backends.
+//! Agreement between every enabled backend release, including versions of the same backend.
 
 #[path = "common/backend_aliases.rs"]
 mod backend_aliases;
-use backend_aliases::*;
-
 #[path = "common/runner.rs"]
 mod common;
 
@@ -25,142 +15,194 @@ use common::{TestMatrix, assert_close, random_matrix, random_vec};
 use lazymatrix::{Centering, LazyMatrix, MatTransposeVec, MatVec, Normalization, Scaling};
 
 type Products = (Vec<f64>, Vec<f64>);
+type ProductFn = fn(&TestMatrix, Normalization, &[f64], &[f64]) -> Products;
+
+#[cfg(feature = "faer_all")]
+macro_rules! faer_adapter {
+    ($name:ident, $backend:ident) => {
+        mod $name {
+            use super::*;
+            use crate::backend_aliases::$backend as faer;
+            pub(super) fn products(
+                tm: &TestMatrix,
+                spec: Normalization,
+                v: &[f64],
+                u: &[f64],
+            ) -> Products {
+                use faer::Col;
+                use faer::sparse::{SparseColMat, Triplet};
+
+                let t: Vec<Triplet<usize, usize, f64>> = tm
+                    .triplets
+                    .iter()
+                    .map(|&(r, c, v)| Triplet::new(r, c, v))
+                    .collect();
+                let matrix = SparseColMat::try_new_from_triplets(tm.nrows, tm.ncols, &t).unwrap();
+                let lazy = LazyMatrix::new(matrix, spec).unwrap();
+                let y = lazy.matvec(&Col::from_fn(v.len(), |i| v[i])).unwrap();
+                let z = lazy
+                    .mat_transpose_vec(&Col::from_fn(u.len(), |i| u[i]))
+                    .unwrap();
+                (
+                    (0..y.nrows()).map(|i| y[i]).collect(),
+                    (0..z.nrows()).map(|i| z[i]).collect(),
+                )
+            }
+            #[cfg(feature = "ndarray_all")]
+            pub(super) fn gram<O: lazymatrix::MatrixWrite<f32>>(out: &mut O) {
+                use lazymatrix::WeightedGramInto;
+                let matrix = faer::sparse::SparseColMat::try_new_from_triplets(
+                    2,
+                    2,
+                    &[
+                        faer::sparse::Triplet::new(0, 0, 1.0_f32),
+                        faer::sparse::Triplet::new(1, 0, 2.0),
+                        faer::sparse::Triplet::new(1, 1, 3.0),
+                    ],
+                )
+                .unwrap();
+                let lazy =
+                    LazyMatrix::from_parts(matrix, Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
+                lazy.weighted_gram_into(&[2.0_f32, -1.0], out).unwrap();
+            }
+        }
+    };
+}
+#[cfg(feature = "faer_v0_22")]
+faer_adapter!(faer_0_22, faer_0_22);
+#[cfg(feature = "faer_v0_23")]
+faer_adapter!(faer_0_23, faer_0_23);
+#[cfg(feature = "faer_v0_24")]
+faer_adapter!(faer_0_24, faer_0_24);
+
+#[cfg(feature = "nalgebra_all")]
+macro_rules! nalgebra_adapter {
+    ($name:ident, $backend:ident, $sparse:ident) => {
+        mod $name {
+            use super::*;
+            use crate::backend_aliases::$backend as nalgebra;
+            use crate::backend_aliases::$sparse as nalgebra_sparse;
+            pub(super) fn products(
+                tm: &TestMatrix,
+                spec: Normalization,
+                v: &[f64],
+                u: &[f64],
+            ) -> Products {
+                use nalgebra::DVector;
+                use nalgebra_sparse::{CooMatrix, CscMatrix};
+
+                let mut coo = CooMatrix::new(tm.nrows, tm.ncols);
+                for &(r, c, v) in &tm.triplets {
+                    coo.push(r, c, v);
+                }
+                let lazy = LazyMatrix::new(CscMatrix::from(&coo), spec).unwrap();
+                (
+                    lazy.matvec(&DVector::from_column_slice(v))
+                        .unwrap()
+                        .as_slice()
+                        .to_vec(),
+                    lazy.mat_transpose_vec(&DVector::from_column_slice(u))
+                        .unwrap()
+                        .as_slice()
+                        .to_vec(),
+                )
+            }
+            #[cfg(feature = "ndarray_all")]
+            pub(super) fn gram<O: lazymatrix::MatrixWrite<f32>>(out: &mut O) {
+                use lazymatrix::WeightedGramInto;
+                let matrix = nalgebra_sparse::CscMatrix::try_from_csc_data(
+                    2,
+                    2,
+                    vec![0, 2, 3],
+                    vec![0, 1, 1],
+                    vec![1.0_f32, 2.0, 3.0],
+                )
+                .unwrap();
+                let lazy =
+                    LazyMatrix::from_parts(matrix, Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
+                lazy.weighted_gram_into(&[2.0_f32, -1.0], out).unwrap();
+            }
+        }
+    };
+}
+#[cfg(feature = "nalgebra_v0_32")]
+nalgebra_adapter!(nalgebra_0_32, nalgebra_0_32, nalgebra_sparse_0_9);
+#[cfg(feature = "nalgebra_v0_33")]
+nalgebra_adapter!(nalgebra_0_33, nalgebra_0_33, nalgebra_sparse_0_10);
+#[cfg(feature = "nalgebra_v0_34")]
+nalgebra_adapter!(nalgebra_0_34, nalgebra_0_34, nalgebra_sparse_0_11);
+#[cfg(feature = "nalgebra_v0_35")]
+nalgebra_adapter!(nalgebra_0_35, nalgebra_0_35, nalgebra_sparse_0_12);
 
 #[cfg(feature = "ndarray_all")]
-#[test]
-fn csc_backends_write_f32_grams_directly_into_ndarray() {
-    use lazymatrix::{WeightedGramInto, WeightedGramKernel};
-    let values = [[1.0_f32, 0.0], [2.0, 3.0]];
-    let weights = [2.0_f32, -1.0];
-    let dense = ndarray::Array2::from_shape_fn((2, 2), |(i, j)| values[i][j]);
-    let lazy = LazyMatrix::from_parts(dense.view(), Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
-    let mut expected = ndarray::Array2::zeros((2, 2));
-    lazy.weighted_gram_into(&weights, &mut expected).unwrap();
-    fn check<M: WeightedGramKernel<f32>>(
-        matrix: M,
-        weights: &[f32],
-        expected: &ndarray::Array2<f32>,
-    ) {
-        let lazy = LazyMatrix::from_parts(matrix, Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
-        let mut out = ndarray::Array2::from_elem((2, 2), f32::NAN);
-        lazy.weighted_gram_into(weights, &mut out.view_mut())
-            .unwrap();
-        for (&a, &b) in out.iter().zip(expected) {
-            approx::assert_abs_diff_eq!(a, b, epsilon = 1e-6);
+macro_rules! ndarray_adapter {
+    ($name:ident, $backend:ident) => {
+        mod $name {
+            use super::*;
+            use crate::backend_aliases::$backend as ndarray;
+            pub(super) fn products(
+                tm: &TestMatrix,
+                spec: Normalization,
+                v: &[f64],
+                u: &[f64],
+            ) -> Products {
+                use ndarray::{Array1, Array2};
+
+                let matrix = Array2::from_shape_fn((tm.nrows, tm.ncols), |(i, j)| tm.dense[i][j]);
+                let lazy = LazyMatrix::new(matrix, spec).unwrap();
+                (
+                    lazy.matvec(&Array1::from_vec(v.to_vec())).unwrap().to_vec(),
+                    lazy.mat_transpose_vec(&Array1::from_vec(u.to_vec()))
+                        .unwrap()
+                        .to_vec(),
+                )
+            }
+            #[cfg(feature = "ndarray_all")]
+            pub(super) fn gram<O: lazymatrix::MatrixWrite<f32>>(out: &mut O) {
+                use lazymatrix::WeightedGramInto;
+                let matrix = ndarray::array![[1.0_f32, 0.0], [2.0, 3.0]];
+                let lazy =
+                    LazyMatrix::from_parts(matrix, Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
+                lazy.weighted_gram_into(&[2.0_f32, -1.0], out).unwrap();
+            }
         }
-    }
-    #[cfg(feature = "faer_all")]
-    {
-        use faer::sparse::{SparseColMat, Triplet};
-        let matrix = SparseColMat::try_new_from_triplets(
-            2,
-            2,
-            &[
-                Triplet::new(0, 0, 1.0_f32),
-                Triplet::new(1, 0, 2.0),
-                Triplet::new(1, 1, 3.0),
-            ],
+    };
+}
+#[cfg(feature = "ndarray_v0_15")]
+ndarray_adapter!(ndarray_0_15, ndarray_0_15);
+#[cfg(feature = "ndarray_v0_16")]
+ndarray_adapter!(ndarray_0_16, ndarray_0_16);
+#[cfg(feature = "ndarray_v0_17")]
+ndarray_adapter!(ndarray_0_17, ndarray_0_17);
+
+#[cfg(feature = "sprs_all")]
+mod sprs {
+    use super::*;
+    use crate::backend_aliases::sprs;
+    pub(super) fn products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
+        let mut triplets = sprs::TriMat::new((tm.nrows, tm.ncols));
+        for &(row, col, value) in &tm.triplets {
+            triplets.add_triplet(row, col, value);
+        }
+        let lazy = LazyMatrix::new(triplets.to_csc::<usize>(), spec).unwrap();
+        (
+            lazy.matvec(&v.to_vec()).unwrap(),
+            lazy.mat_transpose_vec(&u.to_vec()).unwrap(),
         )
-        .unwrap();
-        check(&matrix, &weights, &expected);
     }
-    #[cfg(feature = "nalgebra_all")]
-    {
-        let matrix = nalgebra_sparse::CscMatrix::try_from_csc_data(
-            2,
-            2,
-            vec![0, 2, 3],
-            vec![0, 1, 1],
-            vec![1.0_f32, 2.0, 3.0],
-        )
-        .unwrap();
-        check(&matrix, &weights, &expected);
-    }
-    #[cfg(feature = "sprs_all")]
-    {
-        let matrix = sprs::CsMat::new_csc(
+    #[cfg(feature = "ndarray_all")]
+    pub(super) fn gram<O: lazymatrix::MatrixWrite<f32>>(out: &mut O) {
+        use lazymatrix::WeightedGramInto;
+        let matrix = lazymatrix::SprsCsc::try_new(sprs::CsMat::new_csc(
             (2, 2),
             vec![0, 2, 3],
             vec![0, 1, 1],
             vec![1.0_f32, 2.0, 3.0],
-        );
-        check(
-            lazymatrix::SprsCsc::try_new(matrix.view()).unwrap(),
-            &weights,
-            &expected,
-        );
-    }
-}
-
-#[cfg(feature = "sprs_all")]
-fn sprs_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
-    let mut triplets = sprs::TriMat::new((tm.nrows, tm.ncols));
-    for &(row, col, value) in &tm.triplets {
-        triplets.add_triplet(row, col, value);
-    }
-    let lazy = LazyMatrix::new(triplets.to_csc::<usize>(), spec).unwrap();
-    (
-        lazy.matvec(&v.to_vec()).unwrap(),
-        lazy.mat_transpose_vec(&u.to_vec()).unwrap(),
-    )
-}
-
-#[cfg(feature = "faer_all")]
-fn faer_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
-    use faer::Col;
-    use faer::sparse::{SparseColMat, Triplet};
-
-    let t: Vec<Triplet<usize, usize, f64>> = tm
-        .triplets
-        .iter()
-        .map(|&(r, c, v)| Triplet::new(r, c, v))
-        .collect();
-    let matrix = SparseColMat::try_new_from_triplets(tm.nrows, tm.ncols, &t).unwrap();
-    let lazy = LazyMatrix::new(matrix, spec).unwrap();
-    let y = lazy.matvec(&Col::from_fn(v.len(), |i| v[i])).unwrap();
-    let z = lazy
-        .mat_transpose_vec(&Col::from_fn(u.len(), |i| u[i]))
+        ))
         .unwrap();
-    (
-        (0..y.nrows()).map(|i| y[i]).collect(),
-        (0..z.nrows()).map(|i| z[i]).collect(),
-    )
-}
-
-#[cfg(feature = "nalgebra_all")]
-fn nalgebra_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
-    use nalgebra::DVector;
-    use nalgebra_sparse::{CooMatrix, CscMatrix};
-
-    let mut coo = CooMatrix::new(tm.nrows, tm.ncols);
-    for &(r, c, v) in &tm.triplets {
-        coo.push(r, c, v);
+        let lazy = LazyMatrix::from_parts(matrix, Some(vec![0.5, 1.0]), Some(vec![-2.0, 3.0]));
+        lazy.weighted_gram_into(&[2.0_f32, -1.0], out).unwrap();
     }
-    let lazy = LazyMatrix::new(CscMatrix::from(&coo), spec).unwrap();
-    (
-        lazy.matvec(&DVector::from_column_slice(v))
-            .unwrap()
-            .as_slice()
-            .to_vec(),
-        lazy.mat_transpose_vec(&DVector::from_column_slice(u))
-            .unwrap()
-            .as_slice()
-            .to_vec(),
-    )
-}
-
-#[cfg(feature = "ndarray_all")]
-fn ndarray_products(tm: &TestMatrix, spec: Normalization, v: &[f64], u: &[f64]) -> Products {
-    use ndarray::{Array1, Array2};
-
-    let matrix = Array2::from_shape_fn((tm.nrows, tm.ncols), |(i, j)| tm.dense[i][j]);
-    let lazy = LazyMatrix::new(matrix, spec).unwrap();
-    (
-        lazy.matvec(&Array1::from_vec(v.to_vec())).unwrap().to_vec(),
-        lazy.mat_transpose_vec(&Array1::from_vec(u.to_vec()))
-            .unwrap()
-            .to_vec(),
-    )
 }
 
 fn check_agreement(
@@ -190,38 +232,101 @@ fn check_agreement(
     }
 }
 
-#[cfg(all(feature = "faer_all", feature = "nalgebra_all"))]
 #[test]
-fn faer_and_nalgebra_agree() {
-    check_agreement(faer_products, nalgebra_products);
+fn all_enabled_releases_agree() {
+    let backends: &[(&str, ProductFn)] = &[
+        #[cfg(feature = "faer_v0_22")]
+        ("faer_0_22", faer_0_22::products),
+        #[cfg(feature = "faer_v0_23")]
+        ("faer_0_23", faer_0_23::products),
+        #[cfg(feature = "faer_v0_24")]
+        ("faer_0_24", faer_0_24::products),
+        #[cfg(feature = "nalgebra_v0_32")]
+        ("nalgebra_0_32", nalgebra_0_32::products),
+        #[cfg(feature = "nalgebra_v0_33")]
+        ("nalgebra_0_33", nalgebra_0_33::products),
+        #[cfg(feature = "nalgebra_v0_34")]
+        ("nalgebra_0_34", nalgebra_0_34::products),
+        #[cfg(feature = "nalgebra_v0_35")]
+        ("nalgebra_0_35", nalgebra_0_35::products),
+        #[cfg(feature = "ndarray_v0_15")]
+        ("ndarray_0_15", ndarray_0_15::products),
+        #[cfg(feature = "ndarray_v0_16")]
+        ("ndarray_0_16", ndarray_0_16::products),
+        #[cfg(feature = "ndarray_v0_17")]
+        ("ndarray_0_17", ndarray_0_17::products),
+        #[cfg(feature = "sprs_v0_11")]
+        ("sprs", sprs::products),
+    ];
+    for (i, &(left_name, left)) in backends.iter().enumerate() {
+        for &(right_name, right) in &backends[i + 1..] {
+            eprintln!("Comparing {left_name} and {right_name}");
+            check_agreement(left, right);
+        }
+    }
 }
 
-#[cfg(all(feature = "faer_all", feature = "ndarray_all"))]
-#[test]
-fn faer_and_ndarray_agree() {
-    check_agreement(faer_products, ndarray_products);
+#[cfg(feature = "ndarray_all")]
+macro_rules! gram_output_suite {
+    ($name:ident, $backend:ident) => {
+        mod $name {
+            use super::*;
+            use crate::backend_aliases::$backend as ndarray;
+
+            #[test]
+            fn every_release_writes_grams_into_ndarray() {
+                use lazymatrix::WeightedGramInto;
+                let dense = ndarray::array![[1.0_f32, 0.0], [2.0, 3.0]];
+                let lazy = LazyMatrix::from_parts(
+                    dense.view(),
+                    Some(vec![0.5, 1.0]),
+                    Some(vec![-2.0, 3.0]),
+                );
+                let mut expected = ndarray::Array2::zeros((2, 2));
+                lazy.weighted_gram_into(&[2.0_f32, -1.0], &mut expected.view_mut())
+                    .unwrap();
+                type GramFn = fn(&mut ndarray::Array2<f32>);
+                let backends: &[(&str, GramFn)] = &[
+                    #[cfg(feature = "faer_v0_22")]
+                    ("faer_0_22", faer_0_22::gram),
+                    #[cfg(feature = "faer_v0_23")]
+                    ("faer_0_23", faer_0_23::gram),
+                    #[cfg(feature = "faer_v0_24")]
+                    ("faer_0_24", faer_0_24::gram),
+                    #[cfg(feature = "nalgebra_v0_32")]
+                    ("nalgebra_0_32", nalgebra_0_32::gram),
+                    #[cfg(feature = "nalgebra_v0_33")]
+                    ("nalgebra_0_33", nalgebra_0_33::gram),
+                    #[cfg(feature = "nalgebra_v0_34")]
+                    ("nalgebra_0_34", nalgebra_0_34::gram),
+                    #[cfg(feature = "nalgebra_v0_35")]
+                    ("nalgebra_0_35", nalgebra_0_35::gram),
+                    #[cfg(feature = "ndarray_v0_15")]
+                    ("ndarray_0_15", ndarray_0_15::gram),
+                    #[cfg(feature = "ndarray_v0_16")]
+                    ("ndarray_0_16", ndarray_0_16::gram),
+                    #[cfg(feature = "ndarray_v0_17")]
+                    ("ndarray_0_17", ndarray_0_17::gram),
+                    #[cfg(feature = "sprs_v0_11")]
+                    ("sprs", sprs::gram),
+                ];
+                for &(name, gram) in backends {
+                    let mut out = ndarray::Array2::from_elem((2, 2), f32::NAN);
+                    gram(&mut out);
+                    for (&a, &b) in out.iter().zip(&expected) {
+                        assert!((a - b).abs() < 1e-6, "{name}: {a} != {b}");
+                    }
+                }
+            }
+        }
+    };
 }
 
-#[cfg(all(feature = "nalgebra_all", feature = "ndarray_all"))]
-#[test]
-fn nalgebra_and_ndarray_agree() {
-    check_agreement(nalgebra_products, ndarray_products);
-}
+#[cfg(feature = "ndarray_v0_15")]
+gram_output_suite!(gram_ndarray_0_15, ndarray_0_15);
 
-#[cfg(all(feature = "sprs_all", feature = "faer_all"))]
-#[test]
-fn sprs_and_faer_agree() {
-    check_agreement(sprs_products, faer_products);
-}
+#[cfg(feature = "ndarray_v0_16")]
+gram_output_suite!(gram_ndarray_0_16, ndarray_0_16);
 
-#[cfg(all(feature = "sprs_all", feature = "nalgebra_all"))]
-#[test]
-fn sprs_and_nalgebra_agree() {
-    check_agreement(sprs_products, nalgebra_products);
-}
-
-#[cfg(all(feature = "sprs_all", feature = "ndarray_all"))]
-#[test]
-fn sprs_and_ndarray_agree() {
-    check_agreement(sprs_products, ndarray_products);
-}
+#[cfg(feature = "ndarray_v0_17")]
+gram_output_suite!(gram_ndarray_0_17, ndarray_0_17);

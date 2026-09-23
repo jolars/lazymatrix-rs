@@ -1,0 +1,17 @@
+[package]
+name = "consumer_nalgebra_v0_32"
+version = "0.0.0"
+edition = "2024"
+publish = false
+rust-version = "1.87"
+
+[lib]
+path = "../../src/nalgebra.rs"
+
+[features]
+parallel = ["lazymatrix/parallel"]
+
+[dependencies]
+lazymatrix = { path = "../../../..", default-features = false, features = ["nalgebra_v0_32"] }
+nalgebra = { version = "0.32" }
+nalgebra-sparse = "0.9"

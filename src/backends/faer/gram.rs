@@ -1,3 +1,5 @@
+use super::faer;
+
 use crate::MatrixShape;
 use crate::{MatrixWrite, Scalar, VectorView, WeightedGramInto, WeightedGramKernel};
 use faer::sparse::SparseColMat;

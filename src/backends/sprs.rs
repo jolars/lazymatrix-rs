@@ -135,8 +135,21 @@ macro_rules! allocating_products {
 }
 
 allocating_products!(Vec<F>, |n| vec![F::zero(); n]);
-#[cfg(feature = "ndarray_all")]
-allocating_products!(ndarray::Array1<F>, ndarray::Array1::zeros);
+#[cfg(feature = "ndarray_v0_15")]
+allocating_products!(
+    crate::ndarray_0_15::Array1<F>,
+    crate::ndarray_0_15::Array1::zeros
+);
+#[cfg(feature = "ndarray_v0_16")]
+allocating_products!(
+    crate::ndarray_0_16::Array1<F>,
+    crate::ndarray_0_16::Array1::zeros
+);
+#[cfg(feature = "ndarray_v0_17")]
+allocating_products!(
+    crate::ndarray_0_17::Array1<F>,
+    crate::ndarray_0_17::Array1::zeros
+);
 
 impl<F, I, IP, IS, DS, Iptr> crate::MatrixErrorType for CsMatBase<F, I, IP, IS, DS, Iptr>
 where

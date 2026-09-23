@@ -1,5 +1,7 @@
 //! Vector operations over owned ndarray arrays and borrowed, strided views.
 
+use super::ndarray;
+
 use ndarray::{ArrayBase, Data, DataMut, Ix1};
 
 use crate::traits::{

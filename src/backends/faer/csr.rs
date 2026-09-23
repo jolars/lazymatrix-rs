@@ -24,6 +24,8 @@
 //! needs_rows::<faer::sparse::SparseRowMat<u32, f64>>();
 //! ```
 
+use super::faer;
+
 use faer::prelude::Reborrow;
 use faer::sparse::{SparseRowMat, SparseRowMatMut, SparseRowMatRef};
 

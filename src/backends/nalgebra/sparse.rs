@@ -7,22 +7,9 @@
 //! borrowed column access use the CSC arrays via [`CscMatrix::csc_data`],
 //! treating absent entries as zero.
 
+use super::{ClosedAddAssign, ClosedMulAssign, nalgebra, nalgebra_sparse};
+
 use nalgebra::DVector;
-#[cfg(all(
-    feature = "nalgebra_v0_32",
-    not(any(
-        feature = "nalgebra_v0_33",
-        feature = "nalgebra_v0_34",
-        feature = "nalgebra_v0_35"
-    ))
-))]
-use nalgebra::{ClosedAdd as ClosedAddAssign, ClosedMul as ClosedMulAssign};
-#[cfg(any(
-    feature = "nalgebra_v0_33",
-    feature = "nalgebra_v0_34",
-    feature = "nalgebra_v0_35"
-))]
-use nalgebra::{ClosedAddAssign, ClosedMulAssign};
 use nalgebra_sparse::CscMatrix;
 use nalgebra_sparse::ops::Op;
 use nalgebra_sparse::ops::serial::spmm_csc_dense;

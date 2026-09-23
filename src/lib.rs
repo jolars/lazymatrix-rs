@@ -32,13 +32,13 @@
 //! * `ndarray` — `ndarray::Array2` and borrowed, strided matrix views over
 //!   `ndarray::Array1`.
 //! * `sprs` — CSC and CSR `sprs::CsMat` matrices and borrowed views over `Vec`.
-//!   With an ndarray feature, also supports that release's `Array1` vectors.
+//!   Supports `Array1` vectors from every enabled ndarray release.
 //!   `SprsCsc` checks CSC orientation for borrowed columns; `SprsCsr` checks
 //!   CSR orientation for borrowed rows.
 //! * `zarrs` — synchronous chunked `ZarrMatrix` arrays over `Vec`, with
 //!   fallible products and statistics. Supports `f32` and `f64`.
 //! * `parallel` — parallel column statistics through Rayon; also enables the
-//!   selected faer release's Rayon support.
+//!   enabled faer releases' Rayon support.
 //!
 //! Unversioned features select the newest supported release. Use a versioned
 //! feature to stay on a particular release line:
@@ -51,10 +51,11 @@
 //! | sprs | `sprs_v0_11` | 0.11 |
 //! | zarrs | `zarrs_v0_22` | 0.22 |
 //!
-//! If Cargo enables several releases of one backend, only the newest enabled
-//! release receives trait implementations. Select the same release line in
-//! your direct backend dependency. The `*_all` features are internal markers
-//! and cannot be enabled without a version feature.
+//! If Cargo enables several releases of one backend, every enabled release
+//! receives its own trait implementations. Another dependency enabling a newer
+//! adapter does not remove support for existing types. Select a matching version
+//! feature for each direct backend dependency. The `*_all` features are internal
+//! markers and cannot be enabled without a version feature.
 //!
 //! The core and older backends require Rust 1.87. The `nalgebra` and
 //! `nalgebra_v0_35` features require Rust 1.89. The `nalgebra` feature previously
@@ -185,52 +186,69 @@
 //! The `zarrs_chunked` example creates a filesystem array chunk by chunk. Both
 //! accept row and column counts and print normalization and product timings.
 
-// Cargo feature unification may enable several releases of one backend.
-// Only the newest enabled release receives trait implementations.
+// Each enabled release keeps its own crate identity and implementations.
+#[cfg(feature = "faer_v0_22")]
+extern crate faer_0_22;
 
-#[cfg(all(
-    feature = "nalgebra_v0_32",
-    not(any(
-        feature = "nalgebra_v0_33",
-        feature = "nalgebra_v0_34",
-        feature = "nalgebra_v0_35"
-    ))
-))]
-extern crate nalgebra_0_32 as nalgebra;
+#[cfg(feature = "faer_v0_22")]
+extern crate faer_traits_0_22;
 
-#[cfg(all(
-    feature = "nalgebra_v0_32",
-    not(any(
-        feature = "nalgebra_v0_33",
-        feature = "nalgebra_v0_34",
-        feature = "nalgebra_v0_35"
-    ))
-))]
-extern crate nalgebra_sparse_0_9 as nalgebra_sparse;
+#[cfg(feature = "faer_v0_23")]
+extern crate faer_0_23;
 
-#[cfg(all(
-    feature = "nalgebra_v0_33",
-    not(any(feature = "nalgebra_v0_34", feature = "nalgebra_v0_35"))
-))]
-extern crate nalgebra_0_33 as nalgebra;
+#[cfg(feature = "faer_v0_23")]
+extern crate faer_traits_0_23;
 
-#[cfg(all(
-    feature = "nalgebra_v0_33",
-    not(any(feature = "nalgebra_v0_34", feature = "nalgebra_v0_35"))
-))]
-extern crate nalgebra_sparse_0_10 as nalgebra_sparse;
+#[cfg(feature = "faer_v0_24")]
+extern crate faer as faer_0_24;
 
-#[cfg(all(feature = "nalgebra_v0_34", not(feature = "nalgebra_v0_35")))]
-extern crate nalgebra_0_34 as nalgebra;
+#[cfg(feature = "faer_v0_24")]
+extern crate faer_traits as faer_traits_0_24;
 
-#[cfg(all(feature = "nalgebra_v0_34", not(feature = "nalgebra_v0_35")))]
-extern crate nalgebra_sparse_0_11 as nalgebra_sparse;
+#[cfg(feature = "nalgebra_v0_32")]
+extern crate nalgebra_0_32;
+
+#[cfg(feature = "nalgebra_v0_32")]
+extern crate nalgebra_sparse_0_9;
+
+#[cfg(feature = "nalgebra_v0_33")]
+extern crate nalgebra_0_33;
+
+#[cfg(feature = "nalgebra_v0_33")]
+extern crate nalgebra_sparse_0_10;
+
+#[cfg(feature = "nalgebra_v0_34")]
+extern crate nalgebra_0_34;
+
+#[cfg(feature = "nalgebra_v0_34")]
+extern crate nalgebra_sparse_0_11;
 
 #[cfg(feature = "nalgebra_v0_35")]
-extern crate nalgebra;
+extern crate nalgebra as nalgebra_0_35;
 
 #[cfg(feature = "nalgebra_v0_35")]
-extern crate nalgebra_sparse;
+extern crate nalgebra_sparse as nalgebra_sparse_0_12;
+
+#[cfg(feature = "ndarray_v0_15")]
+extern crate ndarray_0_15;
+
+#[cfg(feature = "ndarray_v0_16")]
+extern crate ndarray_0_16;
+
+#[cfg(feature = "ndarray_v0_17")]
+extern crate ndarray as ndarray_0_17;
+
+#[cfg(feature = "sprs_v0_11")]
+extern crate sprs;
+
+#[cfg(feature = "zarrs_v0_22")]
+extern crate zarrs;
+
+#[cfg(all(
+    feature = "faer_all",
+    not(any(feature = "faer_v0_22", feature = "faer_v0_23", feature = "faer_v0_24"))
+))]
+compile_error!("`faer_all` is internal; enable `faer` or a `faer_v*` feature");
 
 #[cfg(all(
     feature = "nalgebra_all",
@@ -244,18 +262,6 @@ extern crate nalgebra_sparse;
 compile_error!("`nalgebra_all` is internal; enable `nalgebra` or a `nalgebra_v*` feature");
 
 #[cfg(all(
-    feature = "ndarray_v0_15",
-    not(any(feature = "ndarray_v0_16", feature = "ndarray_v0_17"))
-))]
-extern crate ndarray_0_15 as ndarray;
-
-#[cfg(all(feature = "ndarray_v0_16", not(feature = "ndarray_v0_17")))]
-extern crate ndarray_0_16 as ndarray;
-
-#[cfg(feature = "ndarray_v0_17")]
-extern crate ndarray;
-
-#[cfg(all(
     feature = "ndarray_all",
     not(any(
         feature = "ndarray_v0_15",
@@ -265,44 +271,8 @@ extern crate ndarray;
 ))]
 compile_error!("`ndarray_all` is internal; enable `ndarray` or a `ndarray_v*` feature");
 
-#[cfg(all(
-    feature = "faer_v0_22",
-    not(any(feature = "faer_v0_23", feature = "faer_v0_24"))
-))]
-extern crate faer_0_22 as faer;
-
-#[cfg(all(
-    feature = "faer_v0_22",
-    not(any(feature = "faer_v0_23", feature = "faer_v0_24"))
-))]
-extern crate faer_traits_0_22 as faer_traits;
-
-#[cfg(all(feature = "faer_v0_23", not(feature = "faer_v0_24")))]
-extern crate faer_0_23 as faer;
-
-#[cfg(all(feature = "faer_v0_23", not(feature = "faer_v0_24")))]
-extern crate faer_traits_0_23 as faer_traits;
-
-#[cfg(feature = "faer_v0_24")]
-extern crate faer;
-
-#[cfg(feature = "faer_v0_24")]
-extern crate faer_traits;
-
-#[cfg(all(
-    feature = "faer_all",
-    not(any(feature = "faer_v0_22", feature = "faer_v0_23", feature = "faer_v0_24"))
-))]
-compile_error!("`faer_all` is internal; enable `faer` or a `faer_v*` feature");
-
-#[cfg(feature = "sprs_v0_11")]
-extern crate sprs;
-
 #[cfg(all(feature = "sprs_all", not(feature = "sprs_v0_11")))]
 compile_error!("`sprs_all` is internal; enable `sprs` or a `sprs_v*` feature");
-
-#[cfg(feature = "zarrs_v0_22")]
-extern crate zarrs;
 
 #[cfg(all(feature = "zarrs_all", not(feature = "zarrs_v0_22")))]
 compile_error!("`zarrs_all` is internal; enable `zarrs` or a `zarrs_v*` feature");

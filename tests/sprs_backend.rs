@@ -3,7 +3,7 @@
 
 #[path = "common/backend_aliases.rs"]
 mod backend_aliases;
-use backend_aliases::*;
+use backend_aliases::sprs;
 
 #[path = "common/runner.rs"]
 mod common;
@@ -367,52 +367,69 @@ fn sprs_reusable_products_validate_dimensions_and_overwrite_nan() {
 }
 
 #[cfg(feature = "ndarray_all")]
-#[test]
-fn sprs_ndarray_vectors_and_strided_destinations() {
-    use ndarray::{Array1, array, s};
-    common::run_backend_suite(build, |v| Array1::from_vec(v.to_vec()), |v| v.to_vec());
-    common::run_backend_suite(
-        |tm| build(tm).to_csr(),
-        |v| Array1::from_vec(v.to_vec()),
-        |v| v.to_vec(),
-    );
-    common::run_backend_suite(
-        |tm| SprsCsr::try_new(build(tm).to_csr()).unwrap(),
-        |v| Array1::from_vec(v.to_vec()),
-        |v| v.to_vec(),
-    );
-    let matrix = CsMat::new_csc((3, 2), vec![0, 1, 2], vec![0, 2], vec![2.0, -1.0]);
-    let storage = array![1.0, -99.0, 2.0];
-    let mut out = Array1::from_elem(6, f64::NAN);
-    matrix
-        .matvec_into(&storage.slice(s![..;-2]), &mut out.slice_mut(s![..;-2]))
-        .unwrap();
-    assert_eq!(out.slice(s![..;-2]).to_vec(), vec![4.0, 0.0, -1.0]);
-    assert!(out.slice(s![..;2]).iter().all(|v| v.is_nan()));
+macro_rules! ndarray_suite {
+    ($name:ident, $backend:ident) => {
+        mod $name {
+            use super::*;
+            use crate::backend_aliases::$backend as ndarray;
+            #[test]
+            fn sprs_ndarray_vectors_and_strided_destinations() {
+                use ndarray::{Array1, array, s};
+                common::run_backend_suite(build, |v| Array1::from_vec(v.to_vec()), |v| v.to_vec());
+                common::run_backend_suite(
+                    |tm| build(tm).to_csr(),
+                    |v| Array1::from_vec(v.to_vec()),
+                    |v| v.to_vec(),
+                );
+                common::run_backend_suite(
+                    |tm| SprsCsr::try_new(build(tm).to_csr()).unwrap(),
+                    |v| Array1::from_vec(v.to_vec()),
+                    |v| v.to_vec(),
+                );
+                let matrix = CsMat::new_csc((3, 2), vec![0, 1, 2], vec![0, 2], vec![2.0, -1.0]);
+                let storage = array![1.0, -99.0, 2.0];
+                let mut out = Array1::from_elem(6, f64::NAN);
+                matrix
+                    .matvec_into(&storage.slice(s![..;-2]), &mut out.slice_mut(s![..;-2]))
+                    .unwrap();
+                assert_eq!(out.slice(s![..;-2]).to_vec(), vec![4.0, 0.0, -1.0]);
+                assert!(out.slice(s![..;2]).iter().all(|v| v.is_nan()));
 
-    let csr = SprsCsr::try_new(matrix.to_csr()).unwrap();
-    out.fill(f64::NAN);
-    csr.matvec_into(&storage.slice(s![..;-2]), &mut out.slice_mut(s![..;-2]))
-        .unwrap();
-    assert_eq!(out.slice(s![..;-2]).to_vec(), vec![4.0, 0.0, -1.0]);
-    assert!(out.slice(s![..;2]).iter().all(|v| v.is_nan()));
+                let csr = SprsCsr::try_new(matrix.to_csr()).unwrap();
+                out.fill(f64::NAN);
+                csr.matvec_into(&storage.slice(s![..;-2]), &mut out.slice_mut(s![..;-2]))
+                    .unwrap();
+                assert_eq!(out.slice(s![..;-2]).to_vec(), vec![4.0, 0.0, -1.0]);
+                assert!(out.slice(s![..;2]).iter().all(|v| v.is_nan()));
 
-    let lazy = LazyMatrix::new(
-        SprsCsc::try_new(matrix.view()).unwrap(),
-        Normalization::new(Centering::Mean, Scaling::Sd),
-    )
-    .unwrap();
-    let input = array![1.0, 3.0, 2.0];
-    let mut transpose_out = array![f64::NAN, -99.0, f64::NAN, -99.0];
-    lazy.mat_transpose_vec_into(
-        &input.slice(s![..;-1]),
-        &mut transpose_out.slice_mut(s![..;2]),
-    )
-    .unwrap();
-    assert_close(
-        &transpose_out.slice(s![..;2]).to_vec(),
-        &lazy.mat_transpose_vec(&vec![2.0, 3.0, 1.0]).unwrap(),
-        1e-12,
-    );
-    assert_eq!(transpose_out.slice(s![1..;2]).to_vec(), vec![-99.0; 2]);
+                let lazy = LazyMatrix::new(
+                    SprsCsc::try_new(matrix.view()).unwrap(),
+                    Normalization::new(Centering::Mean, Scaling::Sd),
+                )
+                .unwrap();
+                let input = array![1.0, 3.0, 2.0];
+                let mut transpose_out = array![f64::NAN, -99.0, f64::NAN, -99.0];
+                lazy.mat_transpose_vec_into(
+                    &input.slice(s![..;-1]),
+                    &mut transpose_out.slice_mut(s![..;2]),
+                )
+                .unwrap();
+                assert_close(
+                    &transpose_out.slice(s![..;2]).to_vec(),
+                    &lazy.mat_transpose_vec(&vec![2.0, 3.0, 1.0]).unwrap(),
+                    1e-12,
+                );
+                assert_eq!(transpose_out.slice(s![1..;2]).to_vec(), vec![-99.0; 2]);
+            }
+        }
+    };
 }
+
+#[cfg(feature = "ndarray_v0_15")]
+ndarray_suite!(ndarray_0_15, ndarray_0_15);
+
+#[cfg(feature = "ndarray_v0_16")]
+ndarray_suite!(ndarray_0_16, ndarray_0_16);
+
+#[cfg(feature = "ndarray_v0_17")]
+ndarray_suite!(ndarray_0_17, ndarray_0_17);

@@ -14,6 +14,8 @@
 //! needs_rows::<nalgebra_sparse::CscMatrix<f64>>();
 //! ```
 
+use super::nalgebra_sparse;
+
 use nalgebra_sparse::CsrMatrix;
 
 use crate::{MatrixShape, Scalar, SparseRows};

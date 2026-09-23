@@ -1,5 +1,7 @@
 //! Dense nalgebra backend over owned matrices and immutable matrix views.
 
+use super::nalgebra;
+
 use nalgebra::base::storage::{RawStorage, RawStorageMut};
 use nalgebra::{DVector, Dim, Matrix, MatrixView, U1};
 

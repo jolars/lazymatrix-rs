@@ -1,3 +1,5 @@
+use super::{nalgebra, nalgebra_sparse};
+
 use crate::{MatrixWrite, Scalar, VectorView, WeightedGramInto, WeightedGramKernel};
 use nalgebra::{Dim, Matrix, RawStorageMut};
 use nalgebra_sparse::CscMatrix;

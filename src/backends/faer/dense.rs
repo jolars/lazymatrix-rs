@@ -1,5 +1,7 @@
 //! Dense faer backend, including arbitrary-stride immutable matrix views.
 
+use super::faer;
+
 use faer::{Col, ColMut, ColRef, Mat, MatRef};
 
 use crate::backends::support::{

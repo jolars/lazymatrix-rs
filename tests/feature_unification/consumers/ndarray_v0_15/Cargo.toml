@@ -1,0 +1,16 @@
+[package]
+name = "consumer_ndarray_v0_15"
+version = "0.0.0"
+edition = "2024"
+publish = false
+rust-version = "1.87"
+
+[lib]
+path = "../../src/ndarray.rs"
+
+[features]
+parallel = ["lazymatrix/parallel"]
+
+[dependencies]
+lazymatrix = { path = "../../../..", default-features = false, features = ["ndarray_v0_15"] }
+ndarray = { version = "0.15", default-features = false, features = ["std"] }

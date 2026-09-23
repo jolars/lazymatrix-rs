@@ -1,5 +1,7 @@
 //! Vector implementations for the nalgebra backend.
 
+use super::nalgebra;
+
 use nalgebra::DVector;
 
 use crate::traits::{

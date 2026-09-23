@@ -1,0 +1,61 @@
+[package]
+name = "backend-unification"
+version = "0.0.0"
+edition = "2024"
+publish = false
+rust-version = "1.87"
+
+[workspace]
+resolver = "3"
+members = [
+    "consumers/faer_v0_22",
+    "consumers/faer_v0_23",
+    "consumers/faer_v0_24",
+    "consumers/nalgebra_v0_32",
+    "consumers/nalgebra_v0_33",
+    "consumers/nalgebra_v0_34",
+    "consumers/nalgebra_v0_35",
+    "consumers/ndarray_v0_15",
+    "consumers/ndarray_v0_16",
+    "consumers/ndarray_v0_17",
+]
+
+[features]
+default = []
+faer_v0_22 = ["dep:consumer_faer_v0_22"]
+faer_v0_23 = ["dep:consumer_faer_v0_23"]
+faer_v0_24 = ["dep:consumer_faer_v0_24"]
+nalgebra_v0_32 = ["dep:consumer_nalgebra_v0_32"]
+nalgebra_v0_33 = ["dep:consumer_nalgebra_v0_33"]
+nalgebra_v0_34 = ["dep:consumer_nalgebra_v0_34"]
+nalgebra_v0_35 = ["dep:consumer_nalgebra_v0_35"]
+ndarray_v0_15 = ["dep:consumer_ndarray_v0_15"]
+ndarray_v0_16 = ["dep:consumer_ndarray_v0_16"]
+ndarray_v0_17 = ["dep:consumer_ndarray_v0_17"]
+faer = ["faer_v0_24"]
+nalgebra = ["nalgebra_v0_35"]
+ndarray = ["ndarray_v0_17"]
+parallel = [
+    "consumer_faer_v0_22?/parallel",
+    "consumer_faer_v0_23?/parallel",
+    "consumer_faer_v0_24?/parallel",
+    "consumer_nalgebra_v0_32?/parallel",
+    "consumer_nalgebra_v0_33?/parallel",
+    "consumer_nalgebra_v0_34?/parallel",
+    "consumer_nalgebra_v0_35?/parallel",
+    "consumer_ndarray_v0_15?/parallel",
+    "consumer_ndarray_v0_16?/parallel",
+    "consumer_ndarray_v0_17?/parallel",
+]
+
+[dependencies]
+consumer_faer_v0_22 = { path = "consumers/faer_v0_22", optional = true }
+consumer_faer_v0_23 = { path = "consumers/faer_v0_23", optional = true }
+consumer_faer_v0_24 = { path = "consumers/faer_v0_24", optional = true }
+consumer_nalgebra_v0_32 = { path = "consumers/nalgebra_v0_32", optional = true }
+consumer_nalgebra_v0_33 = { path = "consumers/nalgebra_v0_33", optional = true }
+consumer_nalgebra_v0_34 = { path = "consumers/nalgebra_v0_34", optional = true }
+consumer_nalgebra_v0_35 = { path = "consumers/nalgebra_v0_35", optional = true }
+consumer_ndarray_v0_15 = { path = "consumers/ndarray_v0_15", optional = true }
+consumer_ndarray_v0_16 = { path = "consumers/ndarray_v0_16", optional = true }
+consumer_ndarray_v0_17 = { path = "consumers/ndarray_v0_17", optional = true }

@@ -1,5 +1,7 @@
 //! Vector implementations for the faer backend.
 
+use super::{faer, faer_traits};
+
 use faer::Col;
 
 use crate::traits::{

@@ -30,12 +30,20 @@ no features enabled, the crate provides its traits and `LazyMatrix` with only
 a matrix/vector pair. This crate contains no FFI.
 
 Each supported backend release has a version feature, such as `faer_v0_22`.
-The unversioned `faer`, `nalgebra`, `ndarray`, `sprs`, and `zarrs` features select the newest
-supported release. If feature unification enables multiple releases, implement
-only the newest enabled release. Keep crate aliases in `src/lib.rs` and
-`tests/common/backend_aliases.rs` synchronized; examples also use the latter.
-Gate shared backend code on the internal `*_all` markers. Update the version
-matrix in `scripts/test-backends.sh` and CI when adding a supported release.
+The unversioned `faer`, `nalgebra`, `ndarray`, `sprs`, and `zarrs` features select
+the newest supported release. Version features are additive: compile independent
+trait implementations for every enabled release. Shared backend files use the
+crate aliases supplied by version-specific wrapper modules; keep API differences
+in those wrappers and their compatibility helpers. Gate backend-independent
+helpers on the internal `*_all` markers.
+
+Keep version aliases in `src/lib.rs` and `tests/common/backend_aliases.rs`
+synchronized. Correctness suites must exercise every enabled release. Only
+examples and benchmarks use the helper's selected-version convenience aliases.
+The isolated `tests/feature_unification` workspace checks separate consumer
+crates with different backend dependencies. Keep its lockfile compatible with
+the root lockfile and include new releases in its consumers, the backend test
+matrix in `scripts/test-backends.sh`, and CI.
 
 Integration tests are in `tests/`. The backend suites reuse
 `tests/common/runner.rs`, while `tests/cross_backend.rs` checks agreement
@@ -140,7 +148,8 @@ sums, update rules, or an entire solver to the crate.
 - `cargo build --locked` builds the dependency-light core.
 - `cargo build --all-features --locked` checks all supported backends.
 - `task test` runs every backend version with and without parallelism, version
-  pairs, cross-backend comparisons, and the all-feature test matrix.
+  pairs, separate-consumer feature unification, cross-backend comparisons, and
+  the all-feature test matrix.
 - `task ci` runs formatting, Clippy, documentation, and all tests—the local
   equivalent of GitHub CI.
 - `cargo bench --locked --bench column_sds` runs the column-statistics

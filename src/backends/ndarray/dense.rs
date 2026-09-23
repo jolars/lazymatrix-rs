@@ -1,5 +1,7 @@
 //! Matrix operations and column statistics for two-dimensional ndarray arrays.
 
+use super::ndarray;
+
 use ndarray::linalg::general_mat_vec_mul;
 use ndarray::{Array1, ArrayBase, ArrayView1, Data, DataMut, Ix1, Ix2};
 
