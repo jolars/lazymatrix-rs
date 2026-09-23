@@ -161,6 +161,50 @@ state and solver-specific update logic belong in consuming crates.
     versus column semantics are ambiguous, and the general case needs a
     low-rank expression rather than altered normalization metadata.
 
+## Lazy design matrices
+
+- [ ] Prototype a programmatic API for numeric column selection and interactions.
+  - Borrow source columns and store term descriptions, including an optional
+    intercept. For numeric inputs, `~ x1 + x2 + x2:x3` represents the columns
+    `[1, x1, x2, x2 * x3]` without allocating the interaction column.
+  - Implement `MatrixShape`, `MatrixErrorType`, forward and transpose products,
+    and their reusable-output counterparts. Evaluate interactions directly
+    into outputs or accumulators.
+  - Start with borrowed dense columns. Efficient interactions require aligned
+    access to source values; operator products alone are insufficient.
+  - Expose logical column operations for dots, norms, weighted products, and
+    scaled additions so coordinate-wise consumers can use the same terms.
+  - Test products and column operations against a materialized dense oracle,
+    including the adjoint identity, empty inputs, and nonfinite values.
+
+- [ ] Compose lazy design terms with column normalization.
+  - Implement `ColumnStats` and its combined `normalization_stats` hook by
+    scanning source values without materializing expanded columns.
+  - Normalize the expanded terms by default. Centering an interaction is
+    different from multiplying centered predictors; document and test that
+    distinction.
+  - Define how to preserve an intercept with effective center zero and scale
+    one when normalizing the remaining columns.
+
+- [ ] Evaluate sparse and chunked interaction strategies with concrete consumers.
+  - Preserve `SparseColumns` as a borrowed-slice capability; computed sparse
+    interactions must not claim to expose stored product values as slices.
+  - Preserve IEEE nonfinite behavior when exploiting structural zeros.
+  - For storage-backed inputs, evaluate terms from aligned chunks and share
+    reads across terms while retaining fallible operations.
+  - Document scan costs and working memory. Benchmark repeated evaluation
+    against materialization before adding optional caching.
+
+- [ ] Add an optional formula frontend after the numeric representation settles.
+  - Translate formula syntax into the programmatic representation. In R-style
+    syntax, `a:b` denotes an interaction and `a*b` expands to `a + b + a:b`.
+  - Keep parsing and data-schema concerns separate from the dependency-light
+    numerical core; evaluate a separate crate or optional feature.
+  - Define categorical levels, contrasts, term and column ordering, and
+    missing-value handling. Preserve the training schema for prediction,
+    including an explicit policy for unseen levels.
+  - Keep response handling and model fitting in consuming crates.
+
 ## SLOPE rewrite support
 
 These items come from comparing the normalization code in `../libslope` with
