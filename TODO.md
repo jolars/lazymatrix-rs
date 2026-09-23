@@ -4,6 +4,25 @@ This file records design work identified during the initial API audit. The
 crate should expose normalized matrices and their storage capabilities; solver
 state and solver-specific update logic belong in consuming crates.
 
+## Backend version compatibility
+
+- [ ] Make versioned backend features additive under Cargo feature unification.
+  - The current aliases in `src/lib.rs` implement traits only for the newest
+    enabled release. Enabling `ndarray_v0_17` alongside `ndarray_v0_16` removes
+    the implementations for ndarray 0.16 types. An unrelated dependency can
+    therefore break existing consumer code by enabling a newer adapter.
+    nalgebra and faer have the same problem.
+  - Compile trait implementations independently for every enabled release,
+    using distinct crate aliases and shared macros or modules where practical.
+  - Add failing regression tests that construct and use both versions in the
+    same build, including normalization and matrix-vector products. Cover each
+    backend's version pairs and feature unification through separate dependent
+    crates. The existing newest-only test aliases can hide missing older
+    implementations even when version-pair and all-feature builds pass.
+  - Update `tests/common/backend_aliases.rs`, the backend test matrix, and CI
+    to exercise all enabled versions. Replace the newest-only policy in the
+    README, crate documentation, and `AGENTS.md` when the fix lands.
+
 ## Out-of-core storage
 
 - [x] Demonstrate memory-mapped ndarray views with a private `.npy` file.
