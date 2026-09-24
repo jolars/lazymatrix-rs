@@ -12,25 +12,26 @@ re-exports. The main implementation is divided as follows:
 - `src/traits/operator.rs` defines matrix shape and allocating or
   reusable-output matrix-vector products.
 - `src/traits/gram.rs` defines writable dense output and weighted Gram
-  capabilities. `src/gram.rs` contains shared validation and sparse Gram kernels.
+  capabilities. `src/gram.rs` contains shared validation and sparse Gram
+  kernels.
 - `src/traits/vectors.rs`, `stats.rs`, and `columns.rs` define vector algebra,
   sparse-aware statistics, and column capabilities.
 - `src/traits/rows.rs` defines the contiguous sparse-row borrowing capability.
 - `src/backends/faer/` and `src/backends/nalgebra/` contain feature-gated dense,
   sparse, and vector implementations. `src/backends/ndarray/` contains dense
   matrix and vector implementations. `src/backends/sprs/` contains sparse
-  statistics and the checked `SprsCsc` and `SprsCsr` wrappers; `src/backends/sprs.rs`
-  implements CSC and CSR products. `src/backends/zarrs.rs` and its statistics
-module scan synchronous Zarr arrays one chunk at a time. Shared helpers live in
-`src/backends/support.rs`.
+  statistics and the checked `SprsCsc` and `SprsCsr` wrappers;
+  `src/backends/sprs.rs` implements CSC and CSR products.
+  `src/backends/zarrs.rs` and its statistics module scan synchronous Zarr arrays
+  one chunk at a time. Shared helpers live in `src/backends/support.rs`.
 
 Keep backend-independent logic out of backend implementation directories. With
 no features enabled, the crate provides its traits and `LazyMatrix` with only
 `num-traits`; adding a backend means implementing the existing trait surface for
 a matrix/vector pair. This crate contains no FFI.
 
-Each supported backend release has a version feature, such as `faer_v0_22`.
-The unversioned `faer`, `nalgebra`, `ndarray`, `sprs`, and `zarrs` features select
+Each supported backend release has a version feature, such as `faer_v0_22`. The
+unversioned `faer`, `nalgebra`, `ndarray`, `sprs`, and `zarrs` features select
 the newest supported release. Version features are additive: compile independent
 trait implementations for every enabled release. Shared backend files use the
 crate aliases supplied by version-specific wrapper modules; keep API differences
@@ -49,6 +50,12 @@ Integration tests are in `tests/`. The backend suites reuse
 `tests/common/runner.rs`, while `tests/cross_backend.rs` checks agreement
 between implementations. Runnable demonstrations belong in `examples/`, and
 Criterion benchmarks belong in `benches/`. See `TODO.md` for planned API work.
+
+## Development Status
+
+LazyMatrix is in early development. Breaking changes are expected. Prefer a
+robust and consistent API over backwards compatibility until the crate reaches
+1.0.0.
 
 ## Architecture & Invariants
 
@@ -76,32 +83,32 @@ Preserve these normalization semantics:
 
 ## Fallible Operations and Storage
 
-Products, `ColumnStats` methods, and `LazyMatrix::new` return `Result`. Share one
-associated error through `MatrixErrorType`; in-memory backends use `Infallible`.
-Dimension mismatches still panic. Reusable outputs may be partial after an error;
-normalization corrections must run only after the backend succeeds. Forward the
-combined `normalization_stats` hook through references and wrappers so storage
-backends retain their shared scans. `NormalizationStats<F>` is the pair of
-optional center and raw-scale vectors; only computed `LazyMatrix` construction
-replaces exact zero scales with one.
-Explicit construction panics on zero scales, including negative zero, and
-otherwise preserves parameters, including negative scales and nonfinite values.
+Products, `ColumnStats` methods, and `LazyMatrix::new` return `Result`. Share
+one associated error through `MatrixErrorType`; in-memory backends use
+`Infallible`. Dimension mismatches still panic. Reusable outputs may be partial
+after an error; normalization corrections must run only after the backend
+succeeds. Forward the combined `normalization_stats` hook through references and
+wrappers so storage backends retain their shared scans. `NormalizationStats<F>`
+is the pair of optional center and raw-scale vectors; only computed `LazyMatrix`
+construction replaces exact zero scales with one. Explicit construction panics
+on zero scales, including negative zero, and otherwise preserves parameters,
+including negative scales and nonfinite values.
 
 Weighted Gram kernels receive normalization parameters through
 `WeightedGramKernel` and center values before accumulating products. Do not
-correct raw moments afterward: large offsets can erase centered variation.
-Dense ndarray kernels use bounded panels; CSC kernels choose bounded panels or
-borrowed column pairs with subtraction-free sums for implicit rows.
-Noncanonical columns and nonfinite
-arithmetic may use two working columns, but never a full dense design matrix.
-`MatrixWrite` keeps dense coefficient output independent of the input backend.
+correct raw moments afterward: large offsets can erase centered variation. Dense
+ndarray kernels use bounded panels; CSC kernels choose bounded panels or
+borrowed column pairs with subtraction-free sums for implicit rows. Noncanonical
+columns and nonfinite arithmetic may use two working columns, but never a full
+dense design matrix. `MatrixWrite` keeps dense coefficient output independent of
+the input backend.
 
-The zarrs 0.22 backend supports synchronous two-dimensional floating-point arrays
-and Rust 1.87. Read chunks serially, preserve configured fill values, and exclude
-edge padding. Keep working vectors in RAM and never materialize the full array.
-Chunk buffers and codec workspaces depend on storage chunk size, including outer
-shards. Borrowing capabilities must not hide decoding or I/O. Tests use counting
-and failing stores; larger-than-RAM benchmarks remain manual.
+The zarrs 0.22 backend supports synchronous two-dimensional floating-point
+arrays and Rust 1.87. Read chunks serially, preserve configured fill values, and
+exclude edge padding. Keep working vectors in RAM and never materialize the full
+array. Chunk buffers and codec workspaces depend on storage chunk size,
+including outer shards. Borrowing capabilities must not hide decoding or I/O.
+Tests use counting and failing stores; larger-than-RAM benchmarks remain manual.
 
 ## Column Access & Capability Boundaries
 
