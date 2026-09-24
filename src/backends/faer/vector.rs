@@ -94,3 +94,17 @@ impl<F: Scalar> ScaledSubSlice<F> for Col<F> {
         }
     }
 }
+
+macro_rules! impl_vector_owned {
+    ($vector:ty) => {
+        impl<F: Scalar> crate::VectorOwned<F> for $vector {
+            type Owned = Col<F>;
+            fn owned_from_fn(len: usize, value: impl FnMut(usize) -> F) -> Col<F> {
+                Col::from_fn(len, value)
+            }
+        }
+    };
+}
+impl_vector_owned!(Col<F>);
+impl_vector_owned!(faer::ColRef<'_, F>);
+impl_vector_owned!(faer::ColMut<'_, F>);

@@ -83,6 +83,22 @@ macro_rules! backend_suite {
                     &common::materialize(&dense, lazy.centers(), lazy.scales()),
                     &[0.5, 2.0, -1.0],
                 );
+                let augmented = lazymatrix::WithIntercept::new(&lazy);
+                for weights in [[0.5, 2.0, -1.0], [f64::INFINITY, 0.0, 1.0]] {
+                    let mut gram = Mat::full(3, 3, f64::NAN);
+                    augmented.weighted_gram_into(&weights, &mut gram).unwrap();
+                    let actual = common::GramOutput(
+                        (0..3)
+                            .map(|i| (0..3).map(|j| gram[(i, j)]).collect())
+                            .collect(),
+                    );
+                    let normalized = common::materialize(&dense, lazy.centers(), lazy.scales());
+                    let normalized: Vec<Vec<_>> = normalized
+                        .iter()
+                        .map(|r| std::iter::once(1.0).chain(r.iter().copied()).collect())
+                        .collect();
+                    common::assert_gram(&actual, &normalized, &weights);
+                }
                 let mut owned = Mat::zeros(2, 2);
                 lazy.weighted_gram_into(&[0.5, 2.0, -1.0], &mut owned)
                     .unwrap();

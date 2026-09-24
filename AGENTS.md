@@ -9,6 +9,10 @@ re-exports. The main implementation is divided as follows:
 - `src/matrix.rs` implements `LazyMatrix`, construction, column access, and
   operator behavior.
 - `src/column.rs` contains logical and sparse borrowed column views.
+- `src/intercept.rs` implements `WithIntercept`, an implicit leading column of
+  ones added after predictor normalization. `src/weighted_sums.rs` and
+  `src/traits/weighted_sums.rs` provide directly centered weighted-column sums
+  for its Gram cross terms.
 - `src/traits/operator.rs` defines matrix shape and allocating or
   reusable-output matrix-vector products.
 - `src/traits/gram.rs` defines writable dense output and weighted Gram

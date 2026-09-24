@@ -88,3 +88,15 @@ impl<F: Scalar + nalgebra::Scalar> ScaledSubSlice<F> for DVector<F> {
         }
     }
 }
+
+impl<F, R, S> crate::VectorOwned<F> for nalgebra::Matrix<F, R, nalgebra::U1, S>
+where
+    F: Scalar + nalgebra::Scalar,
+    R: nalgebra::Dim,
+    S: nalgebra::RawStorage<F, R, nalgebra::U1>,
+{
+    type Owned = DVector<F>;
+    fn owned_from_fn(len: usize, mut value: impl FnMut(usize) -> F) -> Self::Owned {
+        DVector::from_fn(len, |i, _| value(i))
+    }
+}

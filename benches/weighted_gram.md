@@ -24,7 +24,7 @@ without mean centering, without scaling. Matrix construction and center
 computation take place outside the timed loops. Set both thread variables:
 OpenBLAS builds that use OpenMP follow `OMP_NUM_THREADS`.
 
-Each case measures six operations:
+Each case measures nine operations:
 
 - `dense`: the bounded-panel ndarray Gram kernel, including scratch allocation.
 - `csc`: the sparse Gram kernel, including scratch allocation.
@@ -34,8 +34,12 @@ Each case measures six operations:
   and weighted matrices outside the timed loop.
 - `gemm_with_preparation`: materialization, weighting, and dense multiplication
   inside the timed loop.
+- `dense_intercept` and `csc_intercept`: the same predictors wrapped in
+  `WithIntercept`, including stable weighted-column sums and coefficient scratch.
+- `gemm_intercept`: a prepared dense `[1, X_tilde]` baseline, with preparation
+  outside the timed loop.
 
-All six reuse the coefficient-space output. The prepared GEMM baseline exposes
+All nine reuse the coefficient-space output. The prepared GEMM baselines expose
 the multiplication cost separately from the cost of storing and preparing two
 full design matrices. These matrices are benchmark baselines, not workspace
 used by the Gram kernels.
@@ -48,6 +52,11 @@ tree. Both paths need O(p) column bookkeeping.
 Uncentered CSC does not allocate the tree. Sparse fallback evaluation can
 add two working columns for unsorted or duplicate indices and nonfinite
 arithmetic. Every method needs the O(p²) output.
+
+Intercept wrappers retain O(p) cross terms. Their CSC weighted-sum pass uses
+a separate O(nrows) weight-sum tree when centered, or one working column for
+noncanonical or nonfinite inputs. Predictor Gram and cross-term workspaces run
+sequentially.
 
 ## Local measurements
 

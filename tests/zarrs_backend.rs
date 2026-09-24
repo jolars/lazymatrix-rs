@@ -372,3 +372,47 @@ ndarray_suite!(ndarray_0_16, ndarray_0_16);
 
 #[cfg(feature = "ndarray_v0_17")]
 ndarray_suite!(ndarray_0_17, ndarray_0_17);
+
+#[test]
+fn intercept_adds_no_storage_reads_and_forwards_failures() {
+    use lazymatrix::WithIntercept;
+    let (matrix, store) = tracked(false);
+    let lazy = LazyMatrix::from_parts(&matrix, Some(vec![2.0; 3]), Some(vec![4.0; 3]));
+    let augmented = WithIntercept::new(&lazy);
+    assert!(store.keys.lock().unwrap().is_empty());
+    let mut forward = vec![f64::NAN; 5];
+    augmented
+        .matvec_into(&vec![2.0, 1.0, 1.0, 1.0], &mut forward)
+        .unwrap();
+    assert_eq!(forward, [2.0, 4.25, 6.5, 8.75, 11.0]);
+    assert_scans(&store, &matrix, 1);
+    store.reset();
+    assert_eq!(
+        augmented.mat_transpose_vec(&vec![1.0; 5]).unwrap(),
+        [5.0, 6.25, 7.5, 8.75]
+    );
+    assert_scans(&store, &matrix, 1);
+    store.reset();
+    store.fail_after.store(2, Ordering::Relaxed);
+    assert!(
+        augmented
+            .matvec_into(&vec![2.0, 1.0, 1.0, 1.0], &mut forward)
+            .is_err()
+    );
+    assert_eq!(store.keys.lock().unwrap().len(), 3);
+    store.reset();
+    store.fail_after.store(2, Ordering::Relaxed);
+    let mut transpose = vec![99.0; 4];
+    assert!(
+        augmented
+            .mat_transpose_vec_into(&vec![1.0; 5], &mut transpose)
+            .is_err()
+    );
+    assert_eq!(transpose[0], 99.0);
+    assert_eq!(store.keys.lock().unwrap().len(), 3);
+    store.reset();
+    augmented
+        .matvec_into(&vec![2.0, 1.0, 1.0, 1.0], &mut forward)
+        .unwrap();
+    assert_eq!(forward, [2.0, 4.25, 6.5, 8.75, 11.0]);
+}

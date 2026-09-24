@@ -3,6 +3,7 @@ use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use lazymatrix::{
     ColumnStats, LazyMatrix, MatTransposeVecInto, MatVecInto, SprsCsc, WeightedGramInto,
+    WithIntercept,
 };
 use rand::{RngExt, SeedableRng};
 use rand_chacha::ChaCha8Rng;
@@ -54,6 +55,44 @@ fn benchmark_gram(c: &mut Criterion) {
                         sparse
                             .weighted_gram_into(black_box(&weights), black_box(&mut out))
                             .unwrap()
+                    });
+                });
+
+                let dense_intercept = WithIntercept::new(&dense);
+                let sparse_intercept = WithIntercept::new(&sparse);
+                let mut augmented_out = Array2::zeros((p + 1, p + 1));
+                group.bench_function(BenchmarkId::new("dense_intercept", &case), |b| {
+                    b.iter(|| {
+                        dense_intercept
+                            .weighted_gram_into(black_box(&weights), black_box(&mut augmented_out))
+                            .unwrap()
+                    });
+                });
+                group.bench_function(BenchmarkId::new("csc_intercept", &case), |b| {
+                    b.iter(|| {
+                        sparse_intercept
+                            .weighted_gram_into(black_box(&weights), black_box(&mut augmented_out))
+                            .unwrap()
+                    });
+                });
+                let augmented = Array2::from_shape_fn((n, p + 1), |(i, j)| {
+                    if j == 0 {
+                        1.0
+                    } else {
+                        matrix[(i, j - 1)] - centers.as_ref().map_or(0.0, |c| c[j - 1])
+                    }
+                });
+                let weighted_augmented =
+                    Array2::from_shape_fn((n, p + 1), |(i, j)| augmented[(i, j)] * weights[i]);
+                group.bench_function(BenchmarkId::new("gemm_intercept", &case), |b| {
+                    b.iter(|| {
+                        general_mat_mul(
+                            1.0,
+                            &black_box(&augmented).t(),
+                            black_box(&weighted_augmented),
+                            0.0,
+                            black_box(&mut augmented_out),
+                        )
                     });
                 });
 

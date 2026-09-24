@@ -22,6 +22,43 @@ pub trait VectorViewMut<F: Scalar>: VectorView<F> {
     fn set(&mut self, index: usize, value: F);
 }
 
+/// Construct owned vector storage compatible with a vector or borrowed view.
+///
+/// Lazy operator components use this capability for coefficient scratch and
+/// allocating results. Construction takes O(len) time and storage, without
+/// requiring contiguous access to the source view.
+pub trait VectorOwned<F: Scalar>: VectorView<F> {
+    /// The corresponding resizable, owned backend vector type.
+    type Owned: VectorOwned<F, Owned = Self::Owned> + VectorViewMut<F>;
+
+    /// Construct a vector whose entry at each index is supplied by `value`.
+    fn owned_from_fn(len: usize, value: impl FnMut(usize) -> F) -> Self::Owned;
+}
+
+impl<F: Scalar> VectorOwned<F> for Vec<F> {
+    type Owned = Self;
+
+    fn owned_from_fn(len: usize, value: impl FnMut(usize) -> F) -> Self {
+        (0..len).map(value).collect()
+    }
+}
+
+impl<F: Scalar> VectorOwned<F> for [F] {
+    type Owned = Vec<F>;
+
+    fn owned_from_fn(len: usize, value: impl FnMut(usize) -> F) -> Vec<F> {
+        Vec::owned_from_fn(len, value)
+    }
+}
+
+impl<F: Scalar, const N: usize> VectorOwned<F> for [F; N] {
+    type Owned = Vec<F>;
+
+    fn owned_from_fn(len: usize, value: impl FnMut(usize) -> F) -> Vec<F> {
+        Vec::owned_from_fn(len, value)
+    }
+}
+
 impl<F: Scalar> VectorView<F> for [F] {
     fn len(&self) -> usize {
         <[F]>::len(self)

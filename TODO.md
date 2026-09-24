@@ -264,13 +264,16 @@ system still requires O(p^2) storage.
   - Evaluate a shared weighted-statistics capability after the integration
     establishes a need, especially for backends without borrowed columns.
 
-- [ ] Add an implicit intercept wrapper as a first lazy design-matrix component.
+- [x] Add an implicit intercept wrapper as a first lazy design-matrix component.
   - Represent `A = [1, X_tilde]` by normalizing predictors before adding the
     constant column, so centering cannot erase the intercept.
   - Implement shape, error forwarding, forward and transpose products, and
     reusable-output variants without allocating a column of ones.
   - Construct weighted Gram blocks from the predictor Gram matrix,
     `X_tilde^T weights`, and `sum(weights)`.
+  - Implemented as `WithIntercept`, with directly centered cross terms through
+    `WeightedColumnSumsInto` and backend normalization kernels. See
+    `examples/weighted_gram.rs`.
   - Keep intercept fitting, penalty exclusions, and coefficient transformations
     in the consuming crate. The wrapper should not require a formula frontend.
 

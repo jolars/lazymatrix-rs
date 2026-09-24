@@ -130,6 +130,37 @@
 //! indices may use any supported width. The slices describe the original
 //! matrix, before normalization; normalized row views remain future work.
 
+//! # An implicit intercept
+//!
+//! [`WithIntercept`] represents `[1, predictors]`. Normalize predictors first,
+//! then wrap them so the intercept remains one. It also accepts unnormalized
+//! operators and borrowed inputs. Coefficient zero is always the intercept.
+//! Products retain backend errors and use coefficient scratch without allocating
+//! a column of ones. Fitting and coefficient transformations stay downstream.
+//!
+//! ```
+//! # #[cfg(feature = "ndarray_all")]
+//! # {
+//! # #[cfg(all(feature = "ndarray_v0_15", not(any(feature = "ndarray_v0_16", feature = "ndarray_v0_17"))))]
+//! # use ndarray_0_15 as ndarray;
+//! # #[cfg(all(feature = "ndarray_v0_16", not(feature = "ndarray_v0_17")))]
+//! # use ndarray_0_16 as ndarray;
+//! use lazymatrix::{LazyMatrix, MatVec, WithIntercept};
+//! use ndarray::array;
+//!
+//! let x = array![[1.0], [3.0]];
+//! let predictors = LazyMatrix::with_centers(x.view(), vec![2.0]);
+//! let design = WithIntercept::new(&predictors);
+//! assert_eq!(design.matvec(&array![3.0, 2.0]).unwrap(), array![1.0, 5.0]);
+//! # }
+//! ```
+//!
+//! Intercept Gram products require [`WeightedGramInto`] and
+//! [`WeightedColumnSumsInto`] on the predictors. Cross terms use a separate pass
+//! with direct centering, preserving the existing Gram kernels' numerical policy.
+//! [`WeightedColumnSumsKernel`] supplies explicit backend normalization, and
+//! [`VectorOwned`] supplies owned scratch compatible with backend vector views.
+//!
 //! # Operational errors and out-of-core storage
 //!
 //! [`WeightedGramInto`] computes `Aᵀ diag(weights) A` for dense ndarray and
@@ -280,21 +311,24 @@ compile_error!("`zarrs_all` is internal; enable `zarrs` or a `zarrs_v*` feature"
 mod backends;
 mod column;
 mod gram;
+mod intercept;
 mod matrix;
 mod normalization;
 pub mod traits;
+mod weighted_sums;
 
 #[cfg(feature = "sprs_all")]
 pub use backends::sprs::{SprsCsc, SprsCsr};
 #[cfg(feature = "zarrs_all")]
 pub use backends::zarrs::{ZarrMatrix, ZarrMatrixError};
 pub use column::{LazyColumn, LazySparseColumn, SparseColumnRef};
+pub use intercept::WithIntercept;
 pub use matrix::LazyMatrix;
 pub use normalization::{Centering, Normalization, NormalizationStats, Scaling};
 pub use traits::{
     ColumnStats, Columns, DotProduct, DotSlice, ElemDivAssign, L2Norm, LogicalColumn,
     MatTransposeVec, MatTransposeVecInto, MatVec, MatVecInto, MatrixErrorType, MatrixShape,
     MatrixWrite, RawColumn, RawColumns, Scalar, ScaleAssign, ScaledAddAssign, ScaledSubSlice,
-    SparseColumns, SparseRows, SubScalarAssign, SumEntries, VectorView, VectorViewMut,
-    WeightedGramInto, WeightedGramKernel,
+    SparseColumns, SparseRows, SubScalarAssign, SumEntries, VectorOwned, VectorView, VectorViewMut,
+    WeightedColumnSumsInto, WeightedColumnSumsKernel, WeightedGramInto, WeightedGramKernel,
 };

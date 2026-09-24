@@ -132,3 +132,48 @@ where
         Ok(())
     }
 }
+
+impl<F, S> crate::WeightedColumnSumsInto<F> for ArrayBase<S, Ix2>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+{
+    fn weighted_column_sums_into<W, O>(&self, weights: &W, out: &mut O) -> Result<(), Self::Error>
+    where
+        W: VectorView<F> + ?Sized,
+        O: crate::VectorViewMut<F> + ?Sized,
+    {
+        crate::WeightedColumnSumsKernel::weighted_column_sums_normalized_into(
+            self, weights, None, None, out,
+        )
+    }
+}
+
+impl<F, S> crate::WeightedColumnSumsKernel<F> for ArrayBase<S, Ix2>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+{
+    fn weighted_column_sums_normalized_into<W, O>(
+        &self,
+        weights: &W,
+        centers: Option<&[F]>,
+        scales: Option<&[F]>,
+        out: &mut O,
+    ) -> Result<(), Self::Error>
+    where
+        W: VectorView<F> + ?Sized,
+        O: crate::VectorViewMut<F> + ?Sized,
+    {
+        crate::weighted_sums::validate(self.nrows(), self.ncols(), weights, centers, scales, out);
+        for j in 0..self.ncols() {
+            out.set(
+                j,
+                (0..self.nrows())
+                    .map(|i| normalize(self[(i, j)], j, centers, scales) * weights.get(i))
+                    .sum(),
+            );
+        }
+        Ok(())
+    }
+}

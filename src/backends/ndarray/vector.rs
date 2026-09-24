@@ -186,3 +186,14 @@ where
         }
     }
 }
+
+impl<F, S> crate::VectorOwned<F> for ArrayBase<S, Ix1>
+where
+    F: Scalar,
+    S: Data<Elem = F>,
+{
+    type Owned = super::ndarray::Array1<F>;
+    fn owned_from_fn(len: usize, value: impl FnMut(usize) -> F) -> Self::Owned {
+        super::ndarray::Array1::from_shape_fn(len, value)
+    }
+}

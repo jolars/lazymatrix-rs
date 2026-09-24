@@ -336,3 +336,26 @@ where
             .weighted_gram_normalized_into(weights, self.centers(), self.scales(), out)
     }
 }
+
+impl<M, F> crate::WeightedColumnSumsInto<F> for LazyMatrix<M, F>
+where
+    F: Scalar,
+    M: crate::WeightedColumnSumsKernel<F>,
+{
+    fn weighted_column_sums_into<W, O>(&self, weights: &W, out: &mut O) -> Result<(), Self::Error>
+    where
+        W: crate::VectorView<F> + ?Sized,
+        O: crate::VectorViewMut<F> + ?Sized,
+    {
+        crate::weighted_sums::validate(
+            self.nrows(),
+            self.ncols(),
+            weights,
+            self.centers(),
+            self.scales(),
+            out,
+        );
+        self.data
+            .weighted_column_sums_normalized_into(weights, self.centers(), self.scales(), out)
+    }
+}

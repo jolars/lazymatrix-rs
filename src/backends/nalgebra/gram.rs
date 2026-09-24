@@ -1,4 +1,5 @@
 use super::{nalgebra, nalgebra_sparse};
+use crate::{VectorViewMut, WeightedColumnSumsInto, WeightedColumnSumsKernel};
 
 use crate::{MatrixWrite, Scalar, VectorView, WeightedGramInto, WeightedGramKernel};
 use nalgebra::{Dim, Matrix, RawStorageMut};
@@ -45,6 +46,39 @@ where
         O: MatrixWrite<F> + ?Sized,
     {
         crate::gram::sparse_gram(self, weights, centers, scales, out);
+        Ok(())
+    }
+}
+
+impl<F> WeightedColumnSumsInto<F> for CscMatrix<F>
+where
+    F: Scalar,
+{
+    fn weighted_column_sums_into<W, O>(&self, weights: &W, out: &mut O) -> Result<(), Self::Error>
+    where
+        W: VectorView<F> + ?Sized,
+        O: VectorViewMut<F> + ?Sized,
+    {
+        self.weighted_column_sums_normalized_into(weights, None, None, out)
+    }
+}
+
+impl<F> WeightedColumnSumsKernel<F> for CscMatrix<F>
+where
+    F: Scalar,
+{
+    fn weighted_column_sums_normalized_into<W, O>(
+        &self,
+        weights: &W,
+        centers: Option<&[F]>,
+        scales: Option<&[F]>,
+        out: &mut O,
+    ) -> Result<(), Self::Error>
+    where
+        W: VectorView<F> + ?Sized,
+        O: VectorViewMut<F> + ?Sized,
+    {
+        crate::weighted_sums::sparse_sums(self, weights, centers, scales, out);
         Ok(())
     }
 }

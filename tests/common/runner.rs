@@ -66,9 +66,14 @@ pub fn assert_gram(actual: &GramOutput, normalized: &[Vec<f64>], weights: &[f64]
 
 pub fn run_gram_suite<M>(build: impl Fn(&TestMatrix) -> M)
 where
-    M: lazymatrix::WeightedGramInto<f64> + lazymatrix::WeightedGramKernel<f64> + ColumnStats<f64>,
+    M: lazymatrix::WeightedGramInto<f64>
+        + lazymatrix::WeightedGramKernel<f64>
+        + lazymatrix::WeightedColumnSumsInto<f64>
+        + lazymatrix::WeightedColumnSumsKernel<f64>
+        + ColumnStats<f64>,
 {
     use lazymatrix::WeightedGramInto;
+    run_intercept_gram_suite(&build);
 
     for (n, p, density) in [
         (19, 5, 0.2),
@@ -358,6 +363,8 @@ pub fn run_backend_suite<M, V>(
 ) where
     M: MatVec<V> + MatVecInto<V> + MatTransposeVec<V> + MatTransposeVecInto<V> + ColumnStats<f64>,
     V: Clone
+        + lazymatrix::VectorOwned<f64, Owned = V>
+        + lazymatrix::VectorViewMut<f64>
         + DotProduct<f64>
         + L2Norm<f64>
         + ScaledAddAssign<f64>
@@ -368,6 +375,7 @@ pub fn run_backend_suite<M, V>(
         + SumEntries<f64>
         + ScaledSubSlice<f64>,
 {
+    intercept_products(&build, &to_v, &from_v);
     vector_algebra(&to_v, &from_v);
     oracle_parity(&build, &to_v, &from_v);
     reusable_output_parity(&build, &to_v, &from_v);
@@ -1582,5 +1590,213 @@ fn zero_scale_guard<M, V>(
         let v = to_v(&random_vec(20, tm.ncols));
         let y = from_v(&lazy.matvec(&v).unwrap());
         assert!(y.iter().all(|x| x.is_finite()), "output must be finite");
+    }
+}
+
+fn intercept_products<M, V>(
+    build: &impl Fn(&TestMatrix) -> M,
+    to_v: &impl Fn(&[f64]) -> V,
+    from_v: &impl Fn(&V) -> Vec<f64>,
+) where
+    M: MatVecInto<V> + MatTransposeVecInto<V> + ColumnStats<f64>,
+    V: Clone
+        + lazymatrix::VectorOwned<f64, Owned = V>
+        + lazymatrix::VectorViewMut<f64>
+        + ElemDivAssign<f64>
+        + DotSlice<f64>
+        + SubScalarAssign<f64>
+        + SumEntries<f64>
+        + ScaledSubSlice<f64>,
+{
+    use lazymatrix::WithIntercept;
+    for (n, p, density) in [
+        (9, 4, 0.3),
+        (5, 3, 0.0),
+        (0, 3, 0.0),
+        (3, 0, 0.0),
+        (0, 0, 0.0),
+    ] {
+        let tm = random_matrix(831, n, p, density);
+        let matrix = build(&tm);
+        for center in [Centering::None, Centering::Mean, Centering::Min] {
+            for scale in [
+                Scaling::None,
+                Scaling::Sd,
+                Scaling::L1,
+                Scaling::L2,
+                Scaling::Range,
+                Scaling::MaxAbs,
+            ] {
+                // Empty statistics can be nonfinite; finite explicit parameters
+                // isolate the operator's empty-sum behavior in this fixture.
+                let lazy = if n == 0 {
+                    LazyMatrix::from_parts(&matrix, Some(vec![1.0; p]), Some(vec![-2.0; p]))
+                } else {
+                    LazyMatrix::new(&matrix, Normalization::new(center, scale)).unwrap()
+                };
+                let dense = with_intercept(&materialize(&tm.dense, lazy.centers(), lazy.scales()));
+                let augmented = WithIntercept::new(&lazy);
+                let x = random_vec(832, p + 1);
+                let y = random_vec(833, n);
+                let forward = augmented.matvec(&to_v(&x)).unwrap();
+                let transpose = augmented.mat_transpose_vec(&to_v(&y)).unwrap();
+                let expected_forward = dense_matvec(&dense, &x);
+                let expected_transpose: Vec<_> = (0..p + 1)
+                    .map(|j| (0..n).map(|i| dense[i][j] * y[i]).sum())
+                    .collect();
+                assert_close(&from_v(&forward), &expected_forward, 1e-10);
+                assert_close(&from_v(&transpose), &expected_transpose, 1e-10);
+                let mut out = to_v(&vec![f64::NAN; n]);
+                let mut trans = to_v(&vec![f64::NAN; p + 1]);
+                augmented.matvec_into(&to_v(&x), &mut out).unwrap();
+                augmented
+                    .mat_transpose_vec_into(&to_v(&y), &mut trans)
+                    .unwrap();
+                assert_close(&from_v(&out), &expected_forward, 1e-10);
+                assert_close(&from_v(&trans), &expected_transpose, 1e-10);
+                let lhs: f64 = from_v(&out).iter().zip(&y).map(|(a, b)| a * b).sum();
+                let rhs: f64 = x.iter().zip(from_v(&trans)).map(|(a, b)| a * b).sum();
+                approx::assert_abs_diff_eq!(lhs, rhs, epsilon = 1e-10);
+                let raw = WithIntercept::new(&matrix);
+                assert_close(
+                    &from_v(&raw.matvec(&to_v(&x)).unwrap()),
+                    &dense_matvec(&with_intercept(&tm.dense), &x),
+                    1e-10,
+                );
+            }
+        }
+    }
+}
+
+fn with_intercept(dense: &[Vec<f64>]) -> Vec<Vec<f64>> {
+    dense
+        .iter()
+        .map(|row| std::iter::once(1.0).chain(row.iter().copied()).collect())
+        .collect()
+}
+
+fn run_intercept_gram_suite<M>(build: &impl Fn(&TestMatrix) -> M)
+where
+    M: lazymatrix::WeightedGramInto<f64>
+        + lazymatrix::WeightedGramKernel<f64>
+        + lazymatrix::WeightedColumnSumsInto<f64>
+        + lazymatrix::WeightedColumnSumsKernel<f64>
+        + ColumnStats<f64>,
+{
+    use lazymatrix::{WeightedColumnSumsInto, WeightedGramInto, WithIntercept};
+    for (n, p, density) in [
+        (9, 4, 0.3),
+        (5, 3, 0.0),
+        (0, 3, 0.0),
+        (3, 0, 0.0),
+        (0, 0, 0.0),
+    ] {
+        let tm = random_matrix(835, n, p, density);
+        let matrix = build(&tm);
+        let weights: Vec<_> = (0..n).map(|i| (i % 5) as f64 - 2.0).collect();
+        let mut out = GramOutput(vec![vec![f64::NAN; p + 1]; p + 1]);
+        WithIntercept::new(&matrix)
+            .weighted_gram_into(&weights, &mut out)
+            .unwrap();
+        assert_gram(&out, &with_intercept(&tm.dense), &weights);
+        for center in [Centering::None, Centering::Mean, Centering::Min] {
+            for scale in [
+                Scaling::None,
+                Scaling::Sd,
+                Scaling::L1,
+                Scaling::L2,
+                Scaling::Range,
+                Scaling::MaxAbs,
+            ] {
+                let lazy = LazyMatrix::new(&matrix, Normalization::new(center, scale)).unwrap();
+                WithIntercept::new(&lazy)
+                    .weighted_gram_into(&weights, &mut out)
+                    .unwrap();
+                assert_gram(
+                    &out,
+                    &with_intercept(&materialize(&tm.dense, lazy.centers(), lazy.scales())),
+                    &weights,
+                );
+            }
+        }
+    }
+    for values in [
+        vec![1e16 + 2.0, 1e16 + 4.0, 1e16 + 6.0],
+        vec![0.0, 2.0, -3.0],
+        vec![1.0, 0.0, 1.0],
+        vec![f64::INFINITY, 0.0, -1.0],
+    ] {
+        let tm = TestMatrix {
+            nrows: 3,
+            ncols: 1,
+            dense: values.iter().map(|&x| vec![x]).collect(),
+            triplets: values
+                .iter()
+                .enumerate()
+                .filter(|(_, x)| **x != 0.0)
+                .map(|(i, &x)| (i, 0, x))
+                .collect(),
+        };
+        let matrix = build(&tm);
+        for center in [0.0, 1.0, 1e16, f64::INFINITY, f64::NAN] {
+            for scale in [1.0, -2.0, f64::INFINITY, f64::NAN] {
+                let lazy = LazyMatrix::from_parts(&matrix, Some(vec![center]), Some(vec![scale]));
+                for weights in [
+                    [0.1, 0.2, 0.3],
+                    [0.0, -1.0, 2.0],
+                    [1e20, 1.0, 1e20],
+                    [f64::INFINITY, 1.0, 0.0],
+                    [f64::NAN, 0.0, 1.0],
+                ] {
+                    let mut out = GramOutput(vec![vec![f64::NAN; 2]; 2]);
+                    WithIntercept::new(&lazy)
+                        .weighted_gram_into(&weights, &mut out)
+                        .unwrap();
+                    assert_gram(
+                        &out,
+                        &with_intercept(&materialize(&tm.dense, lazy.centers(), lazy.scales())),
+                        &weights,
+                    );
+                    let mut sums = [f64::NAN];
+                    lazy.weighted_column_sums_into(&weights, &mut sums).unwrap();
+                    if out.0[0][1].is_nan() {
+                        assert!(sums[0].is_nan());
+                    } else {
+                        assert_eq!(sums[0], out.0[0][1]);
+                    }
+                }
+            }
+        }
+        if values[0] == 1e16 + 2.0 {
+            let lazy = LazyMatrix::from_parts(&matrix, Some(vec![1e16]), None);
+            let mut out = GramOutput(vec![vec![f64::NAN; 2]; 2]);
+            WithIntercept::new(lazy)
+                .weighted_gram_into(&[0.1, 0.2, 0.3], &mut out)
+                .unwrap();
+            approx::assert_abs_diff_eq!(out.0[0][1], 2.8, epsilon = 1e-14);
+        }
+        for (weights, centers, scales, size) in [
+            (vec![1.0; 2], None, None, 1),
+            (vec![1.0; 3], None, None, 2),
+            (vec![1.0; 3], Some(vec![1.0; 2]), None, 1),
+            (vec![1.0; 3], None, Some(vec![1.0; 2]), 1),
+            (vec![1.0; 3], None, Some(vec![-0.0]), 1),
+        ] {
+            let mut sums = vec![99.0; size];
+            assert!(
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    matrix
+                        .weighted_column_sums_normalized_into(
+                            &weights,
+                            centers.as_deref(),
+                            scales.as_deref(),
+                            &mut sums,
+                        )
+                        .unwrap();
+                }))
+                .is_err()
+            );
+            assert!(sums.iter().all(|&x| x == 99.0));
+        }
     }
 }

@@ -24,6 +24,14 @@ pub(crate) fn validate<F, W, O>(
         (ncols, ncols),
         "weighted_gram_into: output shape mismatch"
     );
+    validate_normalization(ncols, centers, scales);
+}
+
+pub(crate) fn validate_normalization<F: Scalar>(
+    ncols: usize,
+    centers: Option<&[F]>,
+    scales: Option<&[F]>,
+) {
     if let Some(centers) = centers {
         assert_eq!(centers.len(), ncols, "centers length must equal ncols");
     }
@@ -170,13 +178,13 @@ mod sparse {
 
     // Range sums use additions only. Subtracting a nearly equal stored-weight
     // sum from the total could discard the entire implicit-zero contribution.
-    struct WeightSums<F> {
+    pub(crate) struct WeightSums<F> {
         nodes: Vec<F>,
         len: usize,
     }
 
     impl<F: Scalar> WeightSums<F> {
-        fn new<W: VectorView<F> + ?Sized>(weights: &W) -> Self {
+        pub(crate) fn new<W: VectorView<F> + ?Sized>(weights: &W) -> Self {
             let len = weights.len();
             let mut nodes = vec![F::zero(); 2 * len];
             for i in 0..len {
@@ -188,7 +196,11 @@ mod sparse {
             Self { nodes, len }
         }
 
-        fn sum(&self, start: usize, end: usize) -> F {
+        pub(crate) fn is_finite(&self) -> bool {
+            self.nodes.iter().all(|x| x.is_finite())
+        }
+
+        pub(crate) fn sum(&self, start: usize, end: usize) -> F {
             let (mut l, mut r) = (start + self.len, end + self.len);
             let mut sum = F::zero();
             while l < r {
@@ -348,4 +360,4 @@ mod sparse {
 }
 
 #[cfg(any(feature = "faer_all", feature = "nalgebra_all", feature = "sprs_all"))]
-pub(crate) use sparse::sparse_gram;
+pub(crate) use sparse::{WeightSums, sparse_gram};

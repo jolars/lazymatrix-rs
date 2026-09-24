@@ -3,7 +3,9 @@
 #[path = "../tests/common/backend_aliases.rs"]
 mod backend_aliases;
 use backend_aliases::{ndarray, sprs};
-use lazymatrix::{Centering, LazyMatrix, Normalization, Scaling, SprsCsc, WeightedGramInto};
+use lazymatrix::{
+    Centering, LazyMatrix, Normalization, Scaling, SprsCsc, WeightedGramInto, WithIntercept,
+};
 use ndarray::{Array2, array};
 
 fn main() {
@@ -27,4 +29,14 @@ fn main() {
         .weighted_gram_into(&weights, &mut gram.view_mut())
         .unwrap();
     println!("CSC input:\n{gram}");
+
+    let dense = WithIntercept::new(&dense);
+    let sparse = WithIntercept::new(&sparse);
+    let mut gram = Array2::zeros((3, 3));
+    dense.weighted_gram_into(&weights, &mut gram).unwrap();
+    println!("Dense input with intercept:\n{gram}");
+    sparse
+        .weighted_gram_into(&weights, &mut gram.view_mut())
+        .unwrap();
+    println!("CSC input with intercept:\n{gram}");
 }

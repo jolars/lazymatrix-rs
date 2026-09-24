@@ -14,6 +14,10 @@
 //! * [`WeightedGramInto`] computes dense coefficient-space products into
 //!   [`MatrixWrite`] storage. [`WeightedGramKernel`] lets backends apply
 //!   normalization during accumulation to preserve small centered variations.
+//! * [`WeightedColumnSumsInto`] and [`WeightedColumnSumsKernel`] compute stable
+//!   weighted sums for intercept Gram cross terms.
+//! * [`VectorOwned`] constructs backend-compatible coefficient scratch for lazy
+//!   operator components.
 //! * The five normalization-specific *vector* traits ([`ElemDivAssign`], [`DotSlice`],
 //!   [`SubScalarAssign`], [`SumEntries`], [`ScaledSubSlice`]) — the elementwise
 //!   primitives that fold the lazy normalization into a backend vector. They are
@@ -45,6 +49,7 @@ mod operator;
 mod rows;
 mod stats;
 mod vectors;
+mod weighted_sums;
 
 pub use crate::normalization::{Centering, Normalization, NormalizationStats, Scaling};
 pub use columns::{Columns, LogicalColumn, RawColumn, RawColumns, SparseColumns};
@@ -56,5 +61,7 @@ pub use rows::SparseRows;
 pub use stats::ColumnStats;
 pub use vectors::{
     DotProduct, DotSlice, ElemDivAssign, L2Norm, ScaleAssign, ScaledAddAssign, ScaledSubSlice,
-    SubScalarAssign, SumEntries, VectorView, VectorViewMut,
+    SubScalarAssign, SumEntries, VectorOwned, VectorView, VectorViewMut,
 };
+
+pub use weighted_sums::{WeightedColumnSumsInto, WeightedColumnSumsKernel};

@@ -61,6 +61,41 @@ macro_rules! backend_suite {
             }
 
             #[test]
+            fn intercept_accepts_strided_vectors_and_outputs() {
+                use lazymatrix::{WithIntercept, WeightedGramInto, WeightedColumnSumsInto};
+                let storage = Array2::from_shape_fn((6, 4), |(i, j)| (i + j) as f64);
+                let matrix = storage.slice(s![..;2, ..;2]);
+                let lazy = LazyMatrix::from_parts(matrix, Some(vec![1.0, 2.0]), Some(vec![2.0, -1.0]));
+                let augmented = WithIntercept::new(&lazy);
+                let input = array![2.0, 99.0, 3.0, 99.0, -1.0, 99.0];
+                let x = input.slice(s![..;2]);
+                let mut output = Array1::from_elem(6, 99.0);
+                augmented.matvec_into(&x, &mut output.slice_mut(s![..;2])).unwrap();
+                assert_close(&output.slice(s![..;2]).to_vec(), &augmented.matvec(&x.to_owned()).unwrap().to_vec(), 1e-10);
+                assert!(output.slice(s![1..;2]).iter().all(|&x| x == 99.0));
+                augmented.mat_transpose_vec_into(&x, &mut output.slice_mut(s![..;-2])).unwrap();
+                assert_close(&output.slice(s![..;-2]).to_vec(), &augmented.mat_transpose_vec(&x.to_owned()).unwrap().to_vec(), 1e-10);
+                let mut sums = Array1::from_elem(6, 99.0);
+                augmented.weighted_column_sums_into(&x, &mut sums.slice_mut(s![..;-2])).unwrap();
+                assert_close(&sums.slice(s![..;-2]).to_vec(), &output.slice(s![..;-2]).to_vec(), 1e-10);
+                assert!(sums.slice(s![..;2]).iter().all(|&x| x == 99.0));
+                let mut gram = Array2::from_elem((6, 6), 99.0);
+                augmented.weighted_gram_into(&x, &mut gram.slice_mut(s![..;-2, ..;2])).unwrap();
+                let actual = common::GramOutput(gram.slice(s![..;-2, ..;2]).rows().into_iter().map(|r| r.to_vec()).collect());
+                let dense: Vec<_> = matrix.rows().into_iter().map(|r| r.to_vec()).collect();
+                let normalized: Vec<Vec<_>> = materialize(&dense, lazy.centers(), lazy.scales()).iter().map(|r| std::iter::once(1.0).chain(r.iter().copied()).collect()).collect();
+                common::assert_gram(&actual, &normalized, &x.to_vec());
+                assert!(gram.slice(s![..;2, ..]).iter().all(|&x| x == 99.0));
+                assert!(gram.slice(s![.., 1..;2]).iter().all(|&x| x == 99.0));
+                let small = array![[1.0_f32], [3.0]];
+                let small = WithIntercept::new(LazyMatrix::from_parts(small, Some(vec![1.0_f32]), None));
+                let mut gram = Array2::zeros((2, 2));
+                small.weighted_gram_into(&[2.0_f32, -1.0], &mut gram).unwrap();
+                assert_eq!(gram, array![[1.0, -2.0], [-2.0, -4.0]]);
+                assert_eq!(small.matvec(&array![2.0, 3.0]).unwrap(), array![2.0, 8.0]);
+            }
+
+            #[test]
             fn ndarray_backend_suite() {
                 for build in [build, build_fortran] {
                     common::run_gram_suite(build);

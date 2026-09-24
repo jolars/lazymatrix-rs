@@ -140,6 +140,36 @@ and sparse demonstration.
 The [weighted Gram benchmarks](benches/weighted_gram.md) compare both kernels
 with repeated operator products and dense matrix multiplication, including BLAS.
 
+`WithIntercept` adds a leading constant column after predictor normalization:
+
+```rust
+use lazymatrix::{LazyMatrix, MatVec, WeightedGramInto, WithIntercept};
+use ndarray::{Array2, array};
+
+let x = array![[1.0, 0.0], [2.0, 3.0], [0.0, 4.0]];
+let predictors = LazyMatrix::with_centers(x.view(), vec![1.0, 2.0]);
+let design = WithIntercept::new(&predictors);
+let y = design.matvec(&array![2.0, 1.0, -1.0]).unwrap();
+let mut gram = Array2::zeros((3, 3));
+design.weighted_gram_into(&array![1.0, 0.5, 2.0], &mut gram).unwrap();
+```
+
+The intercept occupies coefficient zero and stays equal to one when predictors
+are centered. The wrapper also accepts unnormalized operators. Products preserve
+the underlying error type and storage access pattern, including chunked reads.
+Reusable products allocate coefficient scratch; no column of ones or design
+matrix is created. `as_inner()` exposes predictor normalization metadata, and
+`into_inner()` recovers the predictors. Fitting, penalty exclusions, and
+coefficient transformations remain with the caller.
+
+Intercept Gram products reuse the predictor output block and compute the cross
+terms in a separate pass through `WeightedColumnSumsInto`. Its kernels apply
+centering before accumulation, including sparse implicit zeros, to preserve
+small variations around large offsets. These capabilities cover the existing
+dense ndarray and CSC Gram inputs; adding an intercept does not add Gram support
+to other storage types. Ordinary forward and transpose products retain the
+underlying operator's factored normalization arithmetic.
+
 The sprs backend supports owned CSC and CSR matrices and borrowed views. Use
 `Vec` for allocating products, or enable an ndarray feature to use that
 release's `Array1`. Reusable-output products accept any supported dense vector
