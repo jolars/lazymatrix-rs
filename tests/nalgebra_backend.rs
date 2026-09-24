@@ -39,6 +39,22 @@ macro_rules! backend_suite {
             }
 
             #[test]
+            fn sparse_products_overwrite_nonfinite_destinations() {
+                use lazymatrix::{MatTransposeVecInto, MatVecInto};
+                let matrix = build(&common::random_matrix(191, 7, 3, 0.4));
+                let x = DVector::from_element(3, 1.0);
+                let u = DVector::from_element(7, 1.0);
+                for old in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                    let mut forward = DVector::from_element(7, old);
+                    let mut transpose = DVector::from_element(3, old);
+                    matrix.matvec_into(&x, &mut forward).unwrap();
+                    matrix.mat_transpose_vec_into(&u, &mut transpose).unwrap();
+                    assert!(forward.iter().all(|x| x.is_finite()));
+                    assert!(transpose.iter().all(|x| x.is_finite()));
+                }
+            }
+
+            #[test]
             fn nalgebra_backend_suite() {
                 common::run_gram_suite(build);
                 common::run_backend_suite(build, to_dvec, from_dvec);

@@ -90,6 +90,8 @@ where
             out.len(),
             "matvec_into: output dimension mismatch"
         );
+        // The backend scales old output by beta, so beta = 0 alone retains NaNs.
+        out.fill(F::zero());
         spmm_csc_dense(
             F::zero(),
             out.as_view_mut(),
@@ -120,6 +122,8 @@ where
             out.len(),
             "mat_transpose_vec_into: output dimension mismatch"
         );
+        // The backend scales old output by beta, so beta = 0 alone retains NaNs.
+        out.fill(F::zero());
         spmm_csc_dense(
             F::zero(),
             out.as_view_mut(),
