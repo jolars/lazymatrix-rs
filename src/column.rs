@@ -261,10 +261,13 @@ impl<C: RawColumn<F>, F: Scalar> LazyColumn<C, F> {
     /// Weighted squared Euclidean norm of the logical normalized column,
     /// `sum_i weights[i] * self[i]^2`.
     ///
-    /// Computing the weight sum takes O(n) time, after which the stored-entry
-    /// calculation takes O(nnz). Use
-    /// [`Self::weighted_norm_squared_with_sum`] when the weight sum is already
-    /// available.
+    /// Accumulates normalized entries directly, including implicit zeros,
+    /// without subtracting stored weights from a rounded total. Signed weights
+    /// and IEEE nonfinite arithmetic are preserved.
+    ///
+    /// Takes O(n + nnz) time. Columns with sorted, unique row indices use
+    /// constant scratch space. Unsorted or duplicate indices require one O(n)
+    /// working column to combine raw entries before normalization.
     ///
     /// # Panics
     ///
@@ -275,14 +278,54 @@ impl<C: RawColumn<F>, F: Scalar> LazyColumn<C, F> {
             self.len(),
             "weights length must equal column length"
         );
-        self.weighted_norm_squared_with_sum(weights, weights.sum())
+        let background = (F::zero() - self.center) / self.scale;
+        let weighted_square = |row, raw_value| {
+            let value = (raw_value - self.center) / self.scale;
+            weights.get(row) * value * value
+        };
+        let mut sum = F::zero();
+        let mut next = 0;
+        let mut canonical = true;
+        self.raw.for_each_stored(|row, value| {
+            if !canonical {
+                return;
+            }
+            if row < next {
+                canonical = false;
+                return;
+            }
+            // Visit implicit rows directly: a rounded total may have already
+            // lost their weights, even when stored deviations are exactly zero.
+            for i in next..row {
+                sum = sum + weights.get(i) * background * background;
+            }
+            sum = sum + weighted_square(row, value);
+            next = row + 1;
+        });
+        if !canonical {
+            // Duplicate raw entries must be combined before squaring, and
+            // arbitrary row order cannot identify gaps in a streaming pass.
+            let mut values = vec![F::zero(); self.len()];
+            self.raw.for_each_stored(|row, value| {
+                values[row] = values[row] + value;
+            });
+            return values
+                .into_iter()
+                .enumerate()
+                .map(|(row, value)| weighted_square(row, value))
+                .sum();
+        }
+        for i in next..self.len() {
+            sum = sum + weights.get(i) * background * background;
+        }
+        sum
     }
 
-    /// Weighted squared norm using a precomputed sum of the weights.
+    /// Weighted squared norm accepting a precomputed total for compatibility.
     ///
-    /// `weight_sum` must equal `weights.iter().sum()`. Supplying it keeps this
-    /// operation O(nnz), which is useful for coordinate-wise Hessian
-    /// calculations with a shared weight vector.
+    /// The total is ignored: subtracting stored weights from it can lose the
+    /// entire contribution of implicit zeros. This uses the same O(n + nnz)
+    /// calculation and scratch space as [`Self::weighted_norm_squared`].
     ///
     /// # Panics
     ///
@@ -290,25 +333,9 @@ impl<C: RawColumn<F>, F: Scalar> LazyColumn<C, F> {
     pub fn weighted_norm_squared_with_sum<W: VectorView<F> + ?Sized>(
         &self,
         weights: &W,
-        weight_sum: F,
+        _weight_sum: F,
     ) -> F {
-        assert_eq!(
-            weights.len(),
-            self.len(),
-            "weights length must equal column length"
-        );
-        let mut stored_squared_deviations = F::zero();
-        let mut stored_weight = F::zero();
-        self.raw.for_each_stored(|row, value| {
-            let weight = weights.get(row);
-            let deviation = value - self.center;
-            stored_squared_deviations = stored_squared_deviations + weight * deviation * deviation;
-            stored_weight = stored_weight + weight;
-        });
-        let implicit_weight = weight_sum - stored_weight;
-        let centered_norm_squared =
-            stored_squared_deviations + implicit_weight * self.center * self.center;
-        centered_norm_squared / (self.scale * self.scale)
+        self.weighted_norm_squared(weights)
     }
 
     /// Add `alpha` times this logical column to a dense destination.

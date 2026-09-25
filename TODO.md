@@ -326,8 +326,10 @@ represent the same four states.
     product.
   - [x] Provide a weighted squared norm `sum_i weights_i * x_tilde_ij^2` for
     coordinate-wise Hessian calculations.
-  - [x] Offer variants accepting cached `sum(weights * vector)` and
-    `sum(weights)` so repeated column operations remain O(nnz_j).
+  - [x] Offer a weighted-dot variant accepting cached `sum(weights * vector)`
+    so repeated dots remain O(nnz_j). Weighted norms scan row weights directly
+    in O(n + nnz_j) to preserve small implicit-zero contributions. Their
+    cached-total variant uses the same calculation.
   - [x] Accept borrowed inputs without forcing copies of dense matrix columns;
     account explicitly for contiguous versus strided vector views.
   - [x] Test each formula against a dense oracle for all four center/scale

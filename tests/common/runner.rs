@@ -650,6 +650,10 @@ pub fn run_logical_columns_suite<M>(build: impl Fn(&TestMatrix) -> M)
 where
     M: RawColumns<f64> + ColumnStats<f64>,
 {
+    weighted_norms_preserve_implicit_contributions(&build);
+    weighted_norms_ignore_rounded_total_weights(&build);
+    weighted_norms_preserve_nonfinite_arithmetic(&build);
+    weighted_norms_normalize_before_squaring(&build);
     let tm = column_view_matrix();
     let centers = vec![0.5, -1.0, 2.0, 3.0];
     let scales = vec![2.0, -4.0, 0.5, -1.5];
@@ -775,6 +779,156 @@ where
     assert!(column.sum().is_nan());
     assert!(column.dot(&[1.0, 2.0, 3.0]).is_nan());
     assert!(column.weighted_norm_squared(&[0.5, 1.0, 1.5]).is_nan());
+}
+
+fn weighted_norms_preserve_implicit_contributions<M: RawColumns<f64>>(
+    build: &impl Fn(&TestMatrix) -> M,
+) {
+    for implicit_row in 0..3 {
+        for explicit_zero in [false, true] {
+            let dense: Vec<_> = (0..3)
+                .map(|i| vec![if i == implicit_row { 0.0 } else { 1.0 }])
+                .collect();
+            let tm = TestMatrix {
+                nrows: 3,
+                ncols: 1,
+                triplets: (0..3)
+                    .filter(|&i| i != implicit_row || explicit_zero)
+                    .map(|i| (i, 0, dense[i][0]))
+                    .collect(),
+                dense,
+            };
+            for scale in [1.0, -2.0] {
+                let lazy = LazyMatrix::from_parts(build(&tm), Some(vec![1.0]), Some(vec![scale]));
+                for small_weight in [1.0, -1.0] {
+                    let mut weights = [1e16; 3];
+                    weights[implicit_row] = small_weight;
+                    let column = lazy.column(0);
+                    let expected = small_weight / (scale * scale);
+                    approx::assert_abs_diff_eq!(
+                        column.weighted_norm_squared(&weights),
+                        expected,
+                        epsilon = EPS
+                    );
+                    approx::assert_abs_diff_eq!(
+                        column.weighted_norm_squared_with_sum(&weights, weights.iter().sum()),
+                        expected,
+                        epsilon = EPS
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn weighted_norms_ignore_rounded_total_weights<M: RawColumns<f64>>(
+    build: &impl Fn(&TestMatrix) -> M,
+) {
+    let dense: Vec<_> = (0..8).map(|i| vec![1e12 + (i % 3) as f64]).collect();
+    let tm = TestMatrix {
+        nrows: 8,
+        ncols: 1,
+        triplets: (0..8).map(|i| (i, 0, dense[i][0])).collect(),
+        dense,
+    };
+    let center = 1e12 + 1.0;
+    let lazy = LazyMatrix::from_parts(build(&tm), Some(vec![center]), None);
+    let weights: Vec<_> = (1..=8).map(|i| 0.1 * i as f64).collect();
+    let expected: f64 = (0..8)
+        .map(|i| weights[i] * (tm.dense[i][0] - center).powi(2))
+        .sum();
+    let column = lazy.column(0);
+    approx::assert_abs_diff_eq!(
+        column.weighted_norm_squared(&weights),
+        expected,
+        epsilon = EPS
+    );
+    for total in [weights.iter().sum(), weights.iter().rev().sum()] {
+        approx::assert_abs_diff_eq!(
+            column.weighted_norm_squared_with_sum(&weights, total),
+            expected,
+            epsilon = EPS
+        );
+    }
+}
+
+fn weighted_norms_preserve_nonfinite_arithmetic<M: RawColumns<f64>>(
+    build: &impl Fn(&TestMatrix) -> M,
+) {
+    let empty = TestMatrix {
+        nrows: 0,
+        ncols: 1,
+        dense: Vec::new(),
+        triplets: Vec::new(),
+    };
+    let empty = LazyMatrix::from_parts(
+        build(&empty),
+        Some(vec![f64::NAN]),
+        Some(vec![f64::INFINITY]),
+    );
+    assert_eq!(empty.column(0).weighted_norm_squared(&[]), 0.0);
+    assert_eq!(
+        empty.column(0).weighted_norm_squared_with_sum(&[], 0.0),
+        0.0
+    );
+    let tm = TestMatrix {
+        nrows: 3,
+        ncols: 1,
+        dense: vec![vec![1.0], vec![0.0], vec![2.0]],
+        triplets: vec![(0, 0, 1.0), (2, 0, 2.0)],
+    };
+    for center in [0.0, 1.0, f64::INFINITY, f64::NAN] {
+        for scale in [1.0, -2.0, f64::INFINITY, f64::NAN] {
+            let lazy = LazyMatrix::from_parts(build(&tm), Some(vec![center]), Some(vec![scale]));
+            for weights in [
+                [1.0, 1.0, 1.0],
+                [f64::INFINITY, 1.0, 1.0],
+                [1.0, f64::INFINITY, 1.0],
+                [1.0, f64::NAN, 1.0],
+                [1.0, f64::NEG_INFINITY, 1.0],
+                [0.0, 0.0, 0.0],
+            ] {
+                let expected: f64 = (0..3)
+                    .map(|i| {
+                        let value = (tm.dense[i][0] - center) / scale;
+                        weights[i] * value * value
+                    })
+                    .sum();
+                let column = lazy.column(0);
+                for actual in [
+                    column.weighted_norm_squared(&weights),
+                    column.weighted_norm_squared_with_sum(&weights, weights.iter().sum()),
+                ] {
+                    if expected.is_nan() {
+                        assert!(actual.is_nan(), "expected NaN, got {actual}");
+                    } else if expected.is_infinite() {
+                        assert_eq!(actual, expected);
+                    } else {
+                        approx::assert_abs_diff_eq!(actual, expected, epsilon = EPS);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn weighted_norms_normalize_before_squaring<M: RawColumns<f64>>(build: &impl Fn(&TestMatrix) -> M) {
+    for scale in [1e200, -1e200, 1e-200, -1e-200] {
+        let tm = TestMatrix {
+            nrows: 3,
+            ncols: 1,
+            dense: vec![vec![scale], vec![0.0], vec![2.0 * scale]],
+            triplets: vec![(0, 0, scale), (2, 0, 2.0 * scale)],
+        };
+        let lazy = LazyMatrix::from_parts(build(&tm), None, Some(vec![scale]));
+        let column = lazy.column(0);
+        let weights = [1.0, -2.0, 3.0];
+        approx::assert_abs_diff_eq!(column.weighted_norm_squared(&weights), 13.0);
+        approx::assert_abs_diff_eq!(
+            column.weighted_norm_squared_with_sum(&weights, weights.iter().sum()),
+            13.0
+        );
+    }
 }
 
 fn sparse_columns_expose_raw_storage<M>(build: &impl Fn(&TestMatrix) -> M)

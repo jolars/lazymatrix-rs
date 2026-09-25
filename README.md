@@ -207,6 +207,13 @@ Logical columns borrow sprs vector views for any supported index type.
 copying. A centered column dot takes O(nrows + nnz_column); `dot_with_sum`
 uses a caller-supplied vector sum to take O(nnz_column).
 
+Weighted column norms accumulate normalized entries directly in
+O(nrows + nnz_column) time, including implicit zeros. A cached total weight
+cannot preserve small implicit-row weights when subtracting a much larger
+stored-weight sum, so `weighted_norm_squared_with_sum` uses the same scan.
+Sorted, unique columns need constant scratch space; unsorted or duplicate
+indices require one working column.
+
 `SparseRows` borrows raw column-index and value slices from CSR storage in O(1)
 time, including explicitly stored zeros. It supports faer's `SparseRowMat`,
 `SparseRowMatRef`, and `SparseRowMatMut` with `usize` indices, and

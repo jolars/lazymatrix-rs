@@ -51,6 +51,26 @@ fn sprs_backend_suite() {
 }
 
 #[test]
+fn sprs_weighted_norms_preserve_f32_implicit_contributions() {
+    let matrix = CsMat::new_csc((3, 1), vec![0, 2], vec![0, 2], vec![1.0_f32, 1.0]);
+    let matrix = SprsCsc::try_new(matrix.view()).unwrap();
+    let lazy = LazyMatrix::with_centers(matrix, vec![1.0_f32]);
+    let weights = [1e8_f32, 1.0, 1e8];
+    approx::assert_abs_diff_eq!(lazy.column(0).weighted_norm_squared(&weights), 1.0);
+    approx::assert_abs_diff_eq!(lazy.sparse_column(0).weighted_norm_squared(&weights), 1.0);
+    approx::assert_abs_diff_eq!(
+        lazy.column(0)
+            .weighted_norm_squared_with_sum(&weights, weights.iter().sum()),
+        1.0
+    );
+    approx::assert_abs_diff_eq!(
+        lazy.sparse_column(0)
+            .weighted_norm_squared_with_sum(&weights, weights.iter().sum()),
+        1.0
+    );
+}
+
+#[test]
 fn sprs_gram_accepts_sliced_columns_and_explicit_zeros() {
     use lazymatrix::WeightedGramInto;
     let matrix = CsMat::new_csc(

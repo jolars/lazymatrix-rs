@@ -70,7 +70,12 @@ pub trait LogicalColumn<F: Scalar> {
     where
         V: VectorView<F> + ?Sized,
         W: VectorView<F> + ?Sized;
+    /// Sum weighted squares of logical entries, including implicit zeros.
     fn weighted_norm_squared<W: VectorView<F> + ?Sized>(&self, weights: &W) -> F;
+    /// Accept a cached total, which implementations may ignore for stability.
+    ///
+    /// [`LazyColumn`](crate::LazyColumn) uses the same O(n + nnz) calculation
+    /// as its uncached method to preserve small implicit-zero contributions.
     fn weighted_norm_squared_with_sum<W: VectorView<F> + ?Sized>(
         &self,
         weights: &W,

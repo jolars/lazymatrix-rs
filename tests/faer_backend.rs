@@ -53,6 +53,27 @@ macro_rules! backend_suite {
             }
 
             #[test]
+            fn faer_weighted_norms_combine_unsorted_duplicates() {
+                let symbolic = faer::sparse::SymbolicSparseColMat::new_unsorted_checked(
+                    3,
+                    1,
+                    vec![0, 4],
+                    Some(vec![3]),
+                    vec![2, 0, 2, 99],
+                );
+                let matrix = SparseColMat::new(symbolic, vec![0.25, 1.0, 0.75, 99.0]);
+                let lazy = LazyMatrix::from_parts(&matrix, Some(vec![1.0]), Some(vec![-2.0]));
+                let weights = [1e16, 1.0, 1e16];
+                for column in [lazy.column(0), lazy.sparse_column(0)] {
+                    approx::assert_abs_diff_eq!(column.weighted_norm_squared(&weights), 0.25);
+                    approx::assert_abs_diff_eq!(
+                        column.weighted_norm_squared_with_sum(&weights, weights.iter().sum()),
+                        0.25
+                    );
+                }
+            }
+
+            #[test]
             fn faer_gram_uses_occupied_columns_and_combines_duplicates() {
                 use lazymatrix::{SparseColumns, WeightedGramInto};
                 let symbolic = faer::sparse::SymbolicSparseColMat::new_unsorted_checked(
