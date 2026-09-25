@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.0](https://github.com/jolars/lazymatrix-rs/compare/v0.3.0...v0.4.0) (2026-09-25)
+
+### Features
+- add implicit intercept operators ([`800a3fc`](https://github.com/jolars/lazymatrix-rs/commit/800a3fcde56c489954735b72011ec1faadffb93b))
+- add weighted Gram matrix products ([`ea63d8c`](https://github.com/jolars/lazymatrix-rs/commit/ea63d8c789738c08d89967bdf599e058a0c866ad))
+
+### Bug Fixes
+- preserve implicit weights in column norms ([`51204f5`](https://github.com/jolars/lazymatrix-rs/commit/51204f5016ccd547635b1ce9e1822b75e4554314))
+- clear sparse product destinations ([`d821440`](https://github.com/jolars/lazymatrix-rs/commit/d8214408dbebfb0bb37591591efbdea5167ed7aa))
+- make backend version features additive ([`e2ae23e`](https://github.com/jolars/lazymatrix-rs/commit/e2ae23eb2e6e71d82a338a47e8a843f1d02776d7))
+
 ## [0.3.0](https://github.com/jolars/lazymatrix-rs/compare/v0.2.0...v0.3.0) (2026-09-22)
 
 ### Breaking changes
